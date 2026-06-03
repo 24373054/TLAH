@@ -1,18 +1,51 @@
-import { useState, useEffect, useRef, useCallback, type DragEvent, type WheelEvent, type TouchEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, type DragEvent } from 'react';
 import { useBackground } from '../../contexts/BackgroundContext';
 
 interface Props { onClose: () => void; }
+
+/* ── Helpers: crop rect ↔ BgConfig ─────────────────────────────── */
+
+// Image is always fitted to the container (cover).
+// The crop rect is defined as fractions of the container: x, y, w.
+// Height is derived from w divided by the device aspect ratio.
+// This maps to BgConfig zoom/posX/posY.
+
+function cropToConfig(cx: number, cy: number, cw: number, ar: number, img: string | null, bri: number, opa: number) {
+  // zoom: 100 = fit; cw=1 means no zoom (fit); cw=0.5 means 2x zoom
+  const zoom = Math.round(100 / cw);
+  // posX/Y: center of the crop rect as percentage of the container
+  const posX = Math.round((cx + cw / 2) * 100);
+  const posY = Math.round((cy + (cw / ar) / 2) * 100);
+  return { image: img, brightness: bri, opacity: opa, zoom, posX, posY };
+}
+
+function configToCrop(zoom: number, posX: number, posY: number, ar: number) {
+  const cw = 100 / zoom; // fraction of container width
+  const ch = cw / ar;
+  const cx = Math.max(0, Math.min(1 - cw, (posX / 100) - cw / 2));
+  const cy = Math.max(0, Math.min(1 - ch, (posY / 100) - ch / 2));
+  return { x: cx, y: cy, w: cw, h: ch };
+}
+
+/* ── Handle types ───────────────────────────────────────────────── */
+
+type Handle = 'tl' | 'tr' | 'bl' | 'br' | 'tm' | 'bm' | 'ml' | 'mr' | 'center';
 
 export function BackgroundSettings({ onClose }: Props) {
   const { config, updateConfig, resetConfig } = useBackground();
   const [img, setImg] = useState(config.image);
   const [brightness, setBrightness] = useState(config.brightness);
   const [opacity, setOpacity] = useState(config.opacity);
-  const [scale, setScale] = useState(config.zoom / 100);    // 1.0 = fit
-  const [offset, setOffset] = useState({ x: (config.posX - 50) / 50 * 100, y: (config.posY - 50) / 50 * 100 });
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const cropRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Device aspect ratio for the crop frame
+  const aspectRatio = window.innerWidth / Math.max(window.innerHeight, 1);
+
+  // Crop rect state (fractions of container, 0–1)
+  const initCrop = configToCrop(config.zoom, config.posX, config.posY, aspectRatio);
+  const [crop, setCrop] = useState(initCrop);
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -20,13 +53,12 @@ export function BackgroundSettings({ onClose }: Props) {
     return () => { document.body.style.overflow = prev; };
   }, []);
 
-  // Convert internal state → BgConfig for live preview
-  const applyPreview = useCallback((s: number, o: { x: number; y: number }) => {
-    const zoom = Math.round(s * 100);
-    const posX = Math.round(50 + (o.x / 100) * 50);
-    const posY = Math.round(50 + (o.y / 100) * 50);
-    updateConfig({ image: img, brightness, opacity, zoom, posX, posY });
-  }, [img, brightness, opacity, updateConfig]);
+  const applyPreview = useCallback((cx: number, cy: number, cw: number) => {
+    const p = cropToConfig(cx, cy, cw, aspectRatio, img, brightness, opacity);
+    updateConfig(p);
+  }, [aspectRatio, img, brightness, opacity, updateConfig]);
+
+  // ── File handling ──────────────────────────────────────────────
 
   const handleFile = (file: File) => {
     if (!file.type.startsWith('image/')) return;
@@ -42,8 +74,10 @@ export function BackgroundSettings({ onClose }: Props) {
         canvas.getContext('2d')!.drawImage(imgEl, 0, 0, w, h);
         const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
         setImg(dataUrl);
-        setScale(1); setOffset({ x: 0, y: 0 });
-        updateConfig({ image: dataUrl, zoom: 100, posX: 50, posY: 50, brightness, opacity });
+        // Default: crop covering 100% of container
+        const defCrop = { x: 0, y: 0, w: 1, h: 1 / aspectRatio };
+        setCrop(defCrop);
+        applyPreview(defCrop.x, defCrop.y, defCrop.w);
       };
       imgEl.src = reader.result as string;
     };
@@ -52,99 +86,193 @@ export function BackgroundSettings({ onClose }: Props) {
 
   const handleDrop = (e: DragEvent) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); };
 
-  const handleSave = () => {
-    const zoom = Math.round(scale * 100);
-    const posX = Math.round(50 + (offset.x / 100) * 50);
-    const posY = Math.round(50 + (offset.y / 100) * 50);
-    updateConfig({ image: img, brightness, opacity, zoom, posX, posY });
-    onClose();
+  const handleSave = () => { const p = cropToConfig(crop.x, crop.y, crop.w, aspectRatio, img, brightness, opacity); updateConfig(p); onClose(); };
+  const handleRemove = () => {
+    resetConfig(); setImg(null); setCrop({ x: 0, y: 0, w: 1, h: 1 / aspectRatio }); setBrightness(100); setOpacity(30);
   };
 
-  const handleRemove = () => { resetConfig(); setImg(null); setScale(1); setOffset({ x: 0, y: 0 }); setBrightness(100); setOpacity(30); };
+  // ── Drag logic for crop rect ───────────────────────────────────
 
-  // ── Mouse / Touch interaction ──────────────────────────────────
+  const dragRef = useRef<{
+    handle: Handle;
+    startMouseX: number;
+    startMouseY: number;
+    startCropX: number;
+    startCropY: number;
+    startCropW: number;
+  } | null>(null);
 
-  const dragState = useRef<{ active: boolean; startX: number; startY: number; offX: number; offY: number; pinchDist: number; pinchScale: number }>({
-    active: false, startX: 0, startY: 0, offX: 0, offY: 0, pinchDist: 0, pinchScale: 1,
-  });
+  const getHandle = (e: React.MouseEvent): Handle => {
+    const el = containerRef.current;
+    if (!el) return 'center';
+    const rect = el.getBoundingClientRect();
+    const rx = (e.clientX - rect.left) / rect.width;
+    const ry = (e.clientY - rect.top) / rect.height;
+    const margin = 0.03; // 3% handle hit area
 
-  const clampOffset = useCallback((x: number, y: number, s: number) => {
-    // Allow panning up to 1 image dimension beyond the frame in each direction
-    const max = 100 * s;
-    return {
-      x: Math.max(-max, Math.min(max, x)),
-      y: Math.max(-max, Math.min(max, y)),
-    };
-  }, []);
+    const left = Math.abs(rx - crop.x) < margin;
+    const right = Math.abs(rx - (crop.x + crop.w)) < margin;
+    const top = Math.abs(ry - crop.y) < margin;
+    const bottom = Math.abs(ry - (crop.y + crop.h)) < margin;
+    const inRect = rx > crop.x - margin && rx < crop.x + crop.w + margin &&
+                   ry > crop.y - margin && ry < crop.y + crop.h + margin;
+
+    if (!inRect) return 'center'; // fallback, should not happen
+    if (top && left) return 'tl';
+    if (top && right) return 'tr';
+    if (bottom && left) return 'bl';
+    if (bottom && right) return 'br';
+    if (top) return 'tm';
+    if (bottom) return 'bm';
+    if (left) return 'ml';
+    if (right) return 'mr';
+    return 'center';
+  };
 
   const onMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
-    dragState.current = { ...dragState.current, active: true, startX: e.clientX, startY: e.clientY, offX: offset.x, offY: offset.y };
+    const handle = getHandle(e);
+    dragRef.current = {
+      handle,
+      startMouseX: e.clientX,
+      startMouseY: e.clientY,
+      startCropX: crop.x,
+      startCropY: crop.y,
+      startCropW: crop.w,
+    };
+  };
+
+  const clampCrop = (x: number, y: number, w: number, ar: number) => {
+    const minW = 0.1;
+    w = Math.max(minW, Math.min(1, w));
+    const h2 = w / ar;
+    x = Math.max(0, Math.min(1 - w, x));
+    y = Math.max(0, Math.min(1 - h2, y));
+    return { x, y, w, h: h2 };
   };
 
   const onMouseMove = (e: React.MouseEvent) => {
-    if (!dragState.current.active) return;
-    const dx = e.clientX - dragState.current.startX;
-    const dy = e.clientY - dragState.current.startY;
-    const newOff = clampOffset(dragState.current.offX + dx, dragState.current.offY + dy, scale);
-    setOffset(newOff);
-    applyPreview(scale, newOff);
-  };
+    const d = dragRef.current;
+    if (!d) return;
 
-  const onMouseUp = () => { dragState.current.active = false; };
+    const el = containerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const dx = (e.clientX - d.startMouseX) / rect.width;
+    const dy = (e.clientY - d.startMouseY) / rect.height;
 
-  const onWheel = (e: WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    const newScale = Math.max(0.5, Math.min(4, scale + delta));
-    setScale(newScale);
-    const newOff = clampOffset(offset.x, offset.y, newScale);
-    setOffset(newOff);
-    applyPreview(newScale, newOff);
-  };
+    let nx = d.startCropX, ny = d.startCropY, nw = d.startCropW;
 
-  // Touch handlers
-  const touchState = useRef<{ pinching: boolean; lastDist: number; lastScale: number; lastX: number; lastY: number; offX: number; offY: number }>({
-    pinching: false, lastDist: 0, lastScale: 1, lastX: 0, lastY: 0, offX: 0, offY: 0,
-  });
-
-  const getTouchDist = (touches: React.TouchList) => {
-    const dx = touches[0].clientX - touches[1].clientX;
-    const dy = touches[0].clientY - touches[1].clientY;
-    return Math.sqrt(dx * dx + dy * dy);
-  };
-
-  const onTouchStart = (e: TouchEvent) => {
-    if (e.touches.length === 1) {
-      dragState.current = { ...dragState.current, active: true, startX: e.touches[0].clientX, startY: e.touches[0].clientY, offX: offset.x, offY: offset.y };
-    } else if (e.touches.length === 2) {
-      dragState.current.active = false;
-      touchState.current = { pinching: true, lastDist: getTouchDist(e.touches), lastScale: scale, lastX: offset.x, lastY: offset.y, offX: offset.x, offY: offset.y };
+    switch (d.handle) {
+      case 'center':
+        nx = d.startCropX + dx;
+        ny = d.startCropY + dy;
+        break;
+      case 'tl':
+        nw = d.startCropW - dx;
+        nx = d.startCropX + dx;
+        ny = d.startCropY + dx / aspectRatio; // maintain aspect ratio for corner
+        { const dh = (d.startCropW - nw) / aspectRatio; ny = d.startCropY + dh; }
+        break;
+      case 'tr':
+        nw = d.startCropW + dx;
+        ny = d.startCropY - dx / aspectRatio;
+        break;
+      case 'bl':
+        nw = d.startCropW - dx;
+        nx = d.startCropX + dx;
+        break;
+      case 'br':
+        nw = d.startCropW + dx;
+        break;
+      case 'tm':
+        ny = d.startCropY + dy;
+        nw = d.startCropW - dy * aspectRatio;
+        break;
+      case 'bm':
+        nw = d.startCropW + dy * aspectRatio;
+        break;
+      case 'ml':
+        nw = d.startCropW - dx;
+        nx = d.startCropX + dx;
+        break;
+      case 'mr':
+        nw = d.startCropW + dx;
+        break;
     }
+
+    const clamped = clampCrop(nx, ny, nw, aspectRatio);
+    setCrop(clamped);
+    applyPreview(clamped.x, clamped.y, clamped.w);
   };
 
-  const onTouchMove = (e: TouchEvent) => {
-    if (touchState.current.pinching && e.touches.length === 2) {
-      const dist = getTouchDist(e.touches);
-      const newScale = Math.max(0.5, Math.min(4, touchState.current.lastScale * (dist / touchState.current.lastDist)));
-      setScale(newScale);
-      const newOff = clampOffset(offset.x, offset.y, newScale);
-      setOffset(newOff);
-      applyPreview(newScale, newOff);
-    } else if (dragState.current.active && e.touches.length === 1) {
-      const dx = e.touches[0].clientX - dragState.current.startX;
-      const dy = e.touches[0].clientY - dragState.current.startY;
-      const newOff = clampOffset(dragState.current.offX + dx, dragState.current.offY + dy, scale);
-      setOffset(newOff);
-      applyPreview(scale, newOff);
-    }
+  const onMouseUp = () => { dragRef.current = null; };
+
+  // Touch support
+  const touchRef = useRef<{ id: number | null; startX: number; startY: number; startCropX: number; startCropY: number; startCropW: number; handle: Handle } | null>(null);
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0];
+    const el = containerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const rx = (t.clientX - rect.left) / rect.width;
+    const ry = (t.clientY - rect.top) / rect.height;
+    const margin = 0.04; // slightly larger for touch
+    const left = Math.abs(rx - crop.x) < margin;
+    const right = Math.abs(rx - (crop.x + crop.w)) < margin;
+    const top = Math.abs(ry - crop.y) < margin;
+    const bottom = Math.abs(ry - (crop.y + crop.h)) < margin;
+    const inRect = rx > crop.x - margin && rx < crop.x + crop.w + margin &&
+                   ry > crop.y - margin && ry < crop.y + crop.h + margin;
+    if (!inRect) return;
+
+    let handle: Handle = 'center';
+    if (top && left) handle = 'tl';
+    else if (top && right) handle = 'tr';
+    else if (bottom && left) handle = 'bl';
+    else if (bottom && right) handle = 'br';
+    else if (top) handle = 'tm';
+    else if (bottom) handle = 'bm';
+    else if (left) handle = 'ml';
+    else if (right) handle = 'mr';
+
+    touchRef.current = { id: t.identifier, startX: t.clientX, startY: t.clientY, startCropX: crop.x, startCropY: crop.y, startCropW: crop.w, handle };
   };
 
-  const onTouchEnd = () => { dragState.current.active = false; touchState.current.pinching = false; };
+  const onTouchMove = (e: React.TouchEvent) => {
+    const td = touchRef.current;
+    if (!td) return;
+    const t = Array.from(e.touches).find(t => t.identifier === td.id);
+    if (!t) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const dx = (t.clientX - td.startX) / rect.width;
+    const dy = (t.clientY - td.startY) / rect.height;
+    // Same logic as mouse move — simplified: just drag 'center' style for touch
+    let nx = td.startCropX + dx, ny = td.startCropY + dy, nw = td.startCropW;
+    if (td.handle === 'br') nw = td.startCropW + dx;
+    else if (td.handle === 'mr') nw = td.startCropW + dx;
+    else if (td.handle === 'tr') { nw = td.startCropW + dx; ny = td.startCropY - dx / aspectRatio; }
+    else if (td.handle === 'tl') { nw = td.startCropW - dx; nx = td.startCropX + dx; ny = td.startCropY + dx / aspectRatio; }
+    else if (td.handle === 'bl') { nw = td.startCropW - dx; nx = td.startCropX + dx; }
+    else if (td.handle === 'tm') { ny = td.startCropY + dy; nw = td.startCropW - dy * aspectRatio; }
+    else if (td.handle === 'bm') { nw = td.startCropW + dy * aspectRatio; }
+    else if (td.handle === 'ml') { nw = td.startCropW - dx; nx = td.startCropX + dx; }
+    const clamped = clampCrop(nx, ny, nw, aspectRatio);
+    setCrop(clamped);
+    applyPreview(clamped.x, clamped.y, clamped.w);
+  };
+
+  const onTouchEnd = () => { touchRef.current = null; };
 
   // ── Render ─────────────────────────────────────────────────────
 
   const labelCls = "block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5";
+
+  const ch = crop.w / aspectRatio;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
@@ -160,40 +288,68 @@ export function BackgroundSettings({ onClose }: Props) {
         </div>
 
         <div className="p-4 space-y-5">
-          {/* Image upload / Crop area */}
           <div>
             <label className={labelCls}>Crop & Position</label>
             {img ? (
               <div
-                ref={cropRef}
-                className="relative w-full rounded-lg overflow-hidden border border-gray-300 dark:border-gray-600 bg-gray-200 dark:bg-gray-800 select-none cursor-grab active:cursor-grabbing"
-                style={{ aspectRatio: `${window.innerWidth} / ${window.innerHeight}` }}
+                ref={containerRef}
+                className="relative w-full rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800 select-none"
+                style={{ aspectRatio: `${aspectRatio}` }}
                 onMouseDown={onMouseDown}
                 onMouseMove={onMouseMove}
                 onMouseUp={onMouseUp}
                 onMouseLeave={onMouseUp}
-                onWheel={onWheel}
                 onTouchStart={onTouchStart}
                 onTouchMove={onTouchMove}
                 onTouchEnd={onTouchEnd}
               >
-                {/* The image — scaled and offset */}
-                <div
-                  className="absolute inset-0"
-                  style={{
-                    backgroundImage: `url(${img})`,
-                    backgroundSize: `${scale * 100}%`,
-                    backgroundPosition: `${50 + offset.x / scale}% ${50 + offset.y / scale}%`,
-                    backgroundRepeat: 'no-repeat',
-                    filter: `brightness(${brightness}%)`,
-                    opacity: opacity / 100,
-                  }}
+                {/* The full image — fitted to container */}
+                <img
+                  src={img}
+                  alt=""
+                  draggable={false}
+                  className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+                  style={{ filter: `brightness(${brightness}%)`, opacity: opacity / 100 }}
                 />
-                {/* Crop frame outline */}
-                <div className="absolute inset-0 border-2 border-purple-500 shadow-[0_0_0_9999px_rgba(0,0,0,0.4)] pointer-events-none" />
+
+                {/* Dark mask outside the crop rect */}
+                {/* Top mask */}
+                <div className="absolute inset-x-0 top-0 bg-black/50 pointer-events-none" style={{ height: `${crop.y * 100}%` }} />
+                {/* Bottom mask */}
+                <div className="absolute inset-x-0 bottom-0 bg-black/50 pointer-events-none" style={{ height: `${(1 - crop.y - ch) * 100}%` }} />
+                {/* Left mask */}
+                <div className="absolute inset-y-0 left-0 bg-black/50 pointer-events-none" style={{ width: `${crop.x * 100}%` }} />
+                {/* Right mask */}
+                <div className="absolute inset-y-0 right-0 bg-black/50 pointer-events-none" style={{ width: `${(1 - crop.x - crop.w) * 100}%` }} />
+
+                {/* Crop frame border */}
+                <div
+                  className="absolute border-2 border-purple-400 shadow-[0_0_0_1px_rgba(168,85,247,0.3)] pointer-events-none"
+                  style={{ left: `${crop.x * 100}%`, top: `${crop.y * 100}%`, width: `${crop.w * 100}%`, height: `${ch * 100}%` }}
+                >
+                  {/* Grid lines */}
+                  <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none">
+                    {Array.from({ length: 9 }).map((_, i) => (
+                      <div key={i} className="border-[0.5px] border-white/20" />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Corner + edge handles */}
+                {(['tl', 'tm', 'tr', 'ml', 'mr', 'bl', 'bm', 'br'] as Handle[]).map(hnd => {
+                  const pos = handlePosition(hnd, crop.x, crop.y, crop.w, ch);
+                  return (
+                    <div
+                      key={hnd}
+                      className="absolute w-3 h-3 bg-white border-2 border-purple-500 rounded-sm shadow cursor-pointer z-10"
+                      style={{ left: pos.left, top: pos.top, transform: 'translate(-50%, -50%)' }}
+                    />
+                  );
+                })}
+
                 {/* Hint */}
                 <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] text-white/70 bg-black/50 px-2 py-1 rounded pointer-events-none">
-                  Drag to pan · Scroll/pinch to zoom
+                  Drag corners/edges to resize · Drag center to move
                 </div>
               </div>
             ) : (
@@ -207,16 +363,14 @@ export function BackgroundSettings({ onClose }: Props) {
                 <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">JPEG/PNG (stored locally in your browser only)</p>
               </div>
             )}
-            {img && (
-              <button onClick={handleRemove} className="mt-2 text-xs text-red-600 dark:text-red-400 hover:underline">Remove image</button>
-            )}
+            {img && <button onClick={handleRemove} className="mt-2 text-xs text-red-600 dark:text-red-400 hover:underline">Remove image</button>}
           </div>
 
           {/* Brightness */}
           <div>
             <label className={labelCls}>Brightness <span className="text-gray-400 dark:text-gray-600 font-mono">({brightness}%)</span></label>
             <input type="range" min={0} max={200} value={brightness}
-                   onChange={e => { const v = Number(e.target.value); setBrightness(v); applyPreview(scale, offset); updateConfig({ brightness: v }); }}
+                   onChange={e => { const v = Number(e.target.value); setBrightness(v); applyPreview(crop.x, crop.y, crop.w); }}
                    className="w-full accent-purple-500" />
           </div>
 
@@ -224,7 +378,7 @@ export function BackgroundSettings({ onClose }: Props) {
           <div>
             <label className={labelCls}>Opacity <span className="text-gray-400 dark:text-gray-600 font-mono">({opacity}%)</span></label>
             <input type="range" min={0} max={100} value={opacity}
-                   onChange={e => { const v = Number(e.target.value); setOpacity(v); applyPreview(scale, offset); updateConfig({ opacity: v }); }}
+                   onChange={e => { const v = Number(e.target.value); setOpacity(v); applyPreview(crop.x, crop.y, crop.w); }}
                    className="w-full accent-purple-500" />
           </div>
         </div>
@@ -240,4 +394,20 @@ export function BackgroundSettings({ onClose }: Props) {
       </div>
     </div>
   );
+}
+
+/* ── Handle position helper ─────────────────────────────────────── */
+
+function handlePosition(h: Handle, x: number, y: number, w: number, hh: number) {
+  switch (h) {
+    case 'tl': return { left: `${x * 100}%`, top: `${y * 100}%` };
+    case 'tm': return { left: `${(x + w / 2) * 100}%`, top: `${y * 100}%` };
+    case 'tr': return { left: `${(x + w) * 100}%`, top: `${y * 100}%` };
+    case 'ml': return { left: `${x * 100}%`, top: `${(y + hh / 2) * 100}%` };
+    case 'mr': return { left: `${(x + w) * 100}%`, top: `${(y + hh / 2) * 100}%` };
+    case 'bl': return { left: `${x * 100}%`, top: `${(y + hh) * 100}%` };
+    case 'bm': return { left: `${(x + w / 2) * 100}%`, top: `${(y + hh) * 100}%` };
+    case 'br': return { left: `${(x + w) * 100}%`, top: `${(y + hh) * 100}%` };
+    default: return { left: '0', top: '0' };
+  }
 }
