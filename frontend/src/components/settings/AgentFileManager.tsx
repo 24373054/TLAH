@@ -10,6 +10,13 @@ interface Props {
 }
 
 export function AgentFileManager({ chatId, onClose, onUpdate }: Props) {
+  // Lock body scroll while open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
   const [loading, setLoading] = useState(false);
   const [agentFile, setAgentFile] = useState<AgentFileData | null>(null);
   const [error, setError] = useState<string | null>(null);

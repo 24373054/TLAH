@@ -1,3 +1,5 @@
+import { useEffect } from 'react';
+
 interface Props {
   open: boolean;
   title: string;
@@ -19,6 +21,13 @@ export function ConfirmDialog({
   onCancel,
   danger = true,
 }: Props) {
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [open]);
+
   if (!open) return null;
 
   return (

@@ -12,6 +12,13 @@ export function SettingsModal({ onClose }: Props) {
   const { globalSettings, providers, saveGlobalSettings } = useSettings();
   const { state } = useChat();
 
+  // Lock body scroll while open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
   const [form, setForm] = useState<GlobalSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [scope, setScope] = useState<'global' | 'chat'>('global');

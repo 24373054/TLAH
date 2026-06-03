@@ -58,12 +58,19 @@ function DebugPanelInner({ turnId, onClose }: { turnId: string; onClose: () => v
     }
   };
 
+  // Lock body scroll while panel is open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
   const activeData = tab === 'request' ? rawRequest : rawResponse;
 
   return (
     <div className="fixed inset-0 z-40 flex flex-col md:flex-row">
-      {/* Backdrop */}
-      <div className="hidden md:block flex-1 bg-black/40" onClick={onClose} />
+      {/* Backdrop — always visible to absorb touches */}
+      <div className="flex-1 bg-black/40" onClick={onClose} />
 
       {/* Panel — bottom sheet on mobile, side panel on desktop */}
       <div className="mt-20 md:mt-0 w-full md:w-[560px] md:max-w-[90vw] bg-gray-950
@@ -146,8 +153,8 @@ function DebugPanelInner({ turnId, onClose }: { turnId: string; onClose: () => v
           </div>
         )}
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-4 bg-gray-950">
+        {/* Content — overscroll-contain prevents scroll-through on mobile */}
+        <div className="flex-1 overflow-y-auto overscroll-contain p-4 bg-gray-950">
           {loading ? (
             <div className="flex items-center justify-center h-full">
               <div className="flex items-center gap-3 text-gray-500">
