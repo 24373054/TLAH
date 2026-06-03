@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useChat } from '../../contexts/ChatContext';
 import { useBackground } from '../../contexts/BackgroundContext';
 import { Sidebar } from './Sidebar';
@@ -12,51 +12,84 @@ interface Props {
   onOpenBackground: () => void;
 }
 
+const CANVAS_AR = 4 / 3; // matches cropper canvas aspect ratio
+
 export function AppLayout({ onOpenSettings, onOpenBackground }: Props) {
   const { state } = useChat();
   const { currentChat } = state;
   const { config } = useBackground();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [bgDims, setBgDims] = useState({ w: 0, h: 0 });
 
-  // Build background style: crop top/bottom → chat top/bottom, centered horizontally.
-  // The image is scaled & positioned so the user's crop rect fills the chat area height,
-  // with horizontal centering. Areas outside the image are transparent.
-  const bgStyle: React.CSSProperties = config.image ? (() => {
-    const { cropX, cropY, cropW, cropH } = config;
+  // Track container size for pixel-precise background positioning
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || !config.image) return;
+    const ro = new ResizeObserver(([e]) => {
+      setBgDims({ w: e.contentRect.width, h: e.contentRect.height });
+    });
+    ro.observe(el);
+    setBgDims({ w: el.clientWidth, h: el.clientHeight });
+    return () => ro.disconnect();
+  }, [config.image]);
+
+  // Compute pixel-precise position so the crop rect fills container height
+  // and is centered horizontally. A crop window clips the image.
+  const bgData = (() => {
+    if (!config.image || !bgDims.w || !bgDims.h) return null;
+    const { cropX, cropY, cropW, cropH, imgX, imgY, imgW, imgH } = config;
     const ch = Math.max(cropH, 0.01);
-    const cw = Math.max(cropW, 0.01);
-    const cropCX = cropX + cropW / 2; // crop center X
 
-    // Scale so the crop height fills the element
-    const sizeY = 100 / ch;
+    const canvasW = bgDims.w;
+    const canvasH = canvasW / CANVAS_AR;
+    const scale = bgDims.h / (ch * canvasH);
 
-    // Position: crop top at element top (0%), crop horizontally centered (50%)
-    // background-position percentage P aligns the P% point of image with P% point of element.
-    // When image size ≠ element size, the formula for element-relative offset is:
-    //   offset = (E - imageSize) * P / 100
-    // We solve for P so that the crop rect aligns with the element.
-    const posX = cw < 0.99
-      ? ((cropCX - 0.5 * cw) / (1 - cw)) * 100
-      : 50;
-    const posY = ch < 0.99
-      ? (cropY / (1 - ch)) * 100
-      : 0;
+    // Crop rect in container pixels
+    const cropLeft = cropX * canvasW * scale;
+    const cropTop = cropY * canvasH * scale;
+    const cropWidth = cropW * canvasW * scale;
+    const cropHeight = cropH * canvasH * scale;
+
+    // Center horizontally
+    const centerOff = (bgDims.w - cropWidth) / 2;
+    const cropWinLeft = centerOff;
+    const cropWinTop = 0; // crop fills container height, so top is 0
+
+    // Image relative to crop window
+    const imgLeft = imgX * canvasW * scale - cropLeft + centerOff;
+    const imgTop = imgY * canvasH * scale - cropTop;
 
     return {
-      backgroundImage: `url(${config.image})`,
-      backgroundSize: `auto ${sizeY}%`,
-      backgroundPosition: `${posX}% ${posY}%`,
-      backgroundRepeat: 'no-repeat',
-      filter: `brightness(${config.brightness}%)`,
-      opacity: config.opacity / 100,
+      cropStyle: {
+        position: 'absolute' as const,
+        left: `${cropWinLeft}px`,
+        top: `${cropWinTop}px`,
+        width: `${cropWidth}px`,
+        height: `${cropHeight}px`,
+        overflow: 'hidden',
+      },
+      imgStyle: {
+        position: 'absolute' as const,
+        left: `${imgLeft}px`,
+        top: `${imgTop}px`,
+        width: `${imgW * canvasW * scale}px`,
+        height: `${imgH * canvasH * scale}px`,
+        filter: `brightness(${config.brightness}%)`,
+        opacity: config.opacity / 100,
+      },
     };
-  })() : {};
+  })();
 
   return (
-    <div className="flex h-full overflow-hidden relative">
-      {/* Background layer — sits behind everything */}
-      {config.image && (
-        <div className="absolute inset-0 z-0 pointer-events-none" style={bgStyle} />
+    <div ref={containerRef} className="flex h-full overflow-hidden relative">
+      {/* Background layer — crop window clips image */}
+      {bgData && (
+        <div className="absolute inset-0 z-0 pointer-events-none">
+          <div style={bgData.cropStyle}>
+            <img src={config.image!} alt="" style={bgData.imgStyle} />
+          </div>
+        </div>
       )}
 
       {/* Mobile overlay backdrop */}
