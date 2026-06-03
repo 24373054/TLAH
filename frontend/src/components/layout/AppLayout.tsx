@@ -18,15 +18,21 @@ export function AppLayout({ onOpenSettings, onOpenBackground }: Props) {
   const { config } = useBackground();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Build background style
-  const bgStyle: React.CSSProperties = config.image ? {
-    backgroundImage: `url(${config.image})`,
-    backgroundSize: config.zoom <= 100 ? 'contain' : `${config.zoom}%`,
-    backgroundPosition: `${config.posX}% ${config.posY}%`,
-    backgroundRepeat: 'no-repeat',
-    filter: `brightness(${config.brightness}%)`,
-    opacity: config.opacity / 100,
-  } : {};
+  // Build background style from crop rect
+  // Scale so the crop region fills the screen (cover-like: use the smaller crop dimension)
+  const bgStyle: React.CSSProperties = config.image ? (() => {
+    const scale = 100 / Math.min(config.cropW || 1, config.cropH || 1);
+    const cx = (config.cropX + config.cropW / 2) * 100;
+    const cy = (config.cropY + config.cropH / 2) * 100;
+    return {
+      backgroundImage: `url(${config.image})`,
+      backgroundSize: `${scale}%`,
+      backgroundPosition: `${cx}% ${cy}%`,
+      backgroundRepeat: 'no-repeat',
+      filter: `brightness(${config.brightness}%)`,
+      opacity: config.opacity / 100,
+    };
+  })() : {};
 
   return (
     <div className="flex h-full overflow-hidden relative">

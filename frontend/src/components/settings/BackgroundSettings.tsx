@@ -1,51 +1,19 @@
-import { useState, useEffect, useRef, useCallback, type DragEvent } from 'react';
+import { useState, useEffect, useRef, type DragEvent } from 'react';
 import { useBackground } from '../../contexts/BackgroundContext';
 
 interface Props { onClose: () => void; }
 
-/* ── Helpers: crop rect ↔ BgConfig ─────────────────────────────── */
-
-// Image is always fitted to the container (cover).
-// The crop rect is defined as fractions of the container: x, y, w.
-// Height is derived from w divided by the device aspect ratio.
-// This maps to BgConfig zoom/posX/posY.
-
-function cropToConfig(cx: number, cy: number, cw: number, ar: number, img: string | null, bri: number, opa: number) {
-  // zoom: 100 = fit; cw=1 means no zoom (fit); cw=0.5 means 2x zoom
-  const zoom = Math.round(100 / cw);
-  // posX/Y: center of the crop rect as percentage of the container
-  const posX = Math.round((cx + cw / 2) * 100);
-  const posY = Math.round((cy + (cw / ar) / 2) * 100);
-  return { image: img, brightness: bri, opacity: opa, zoom, posX, posY };
-}
-
-function configToCrop(zoom: number, posX: number, posY: number, ar: number) {
-  const cw = 100 / zoom; // fraction of container width
-  const ch = cw / ar;
-  const cx = Math.max(0, Math.min(1 - cw, (posX / 100) - cw / 2));
-  const cy = Math.max(0, Math.min(1 - ch, (posY / 100) - ch / 2));
-  return { x: cx, y: cy, w: cw, h: ch };
-}
-
-/* ── Handle types ───────────────────────────────────────────────── */
-
-type Handle = 'tl' | 'tr' | 'bl' | 'br' | 'tm' | 'bm' | 'ml' | 'mr' | 'center';
+type Corner = 'tl' | 'tr' | 'bl' | 'br';
 
 export function BackgroundSettings({ onClose }: Props) {
   const { config, updateConfig, resetConfig } = useBackground();
   const [img, setImg] = useState(config.image);
   const [brightness, setBrightness] = useState(config.brightness);
   const [opacity, setOpacity] = useState(config.opacity);
+  const [crop, setCrop] = useState({ x: config.cropX, y: config.cropY, w: config.cropW, h: config.cropH });
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-
-  // Device aspect ratio for the crop frame
-  const aspectRatio = window.innerWidth / Math.max(window.innerHeight, 1);
-
-  // Crop rect state (fractions of container, 0–1)
-  const initCrop = configToCrop(config.zoom, config.posX, config.posY, aspectRatio);
-  const [crop, setCrop] = useState(initCrop);
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -53,10 +21,9 @@ export function BackgroundSettings({ onClose }: Props) {
     return () => { document.body.style.overflow = prev; };
   }, []);
 
-  const applyPreview = useCallback((cx: number, cy: number, cw: number) => {
-    const p = cropToConfig(cx, cy, cw, aspectRatio, img, brightness, opacity);
-    updateConfig(p);
-  }, [aspectRatio, img, brightness, opacity, updateConfig]);
+  const apply = (cx: number, cy: number, cw: number, ch: number) => {
+    updateConfig({ image: img, brightness, opacity, cropX: cx, cropY: cy, cropW: cw, cropH: ch });
+  };
 
   // ── File handling ──────────────────────────────────────────────
 
@@ -74,10 +41,9 @@ export function BackgroundSettings({ onClose }: Props) {
         canvas.getContext('2d')!.drawImage(imgEl, 0, 0, w, h);
         const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
         setImg(dataUrl);
-        // Default: crop covering 100% of container
-        const defCrop = { x: 0, y: 0, w: 1, h: 1 / aspectRatio };
-        setCrop(defCrop);
-        applyPreview(defCrop.x, defCrop.y, defCrop.w);
+        const def = { x: 0, y: 0, w: 1, h: 1 };
+        setCrop(def);
+        apply(def.x, def.y, def.w, def.h);
       };
       imgEl.src = reader.result as string;
     };
@@ -86,200 +52,112 @@ export function BackgroundSettings({ onClose }: Props) {
 
   const handleDrop = (e: DragEvent) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); };
 
-  const handleSave = () => { const p = cropToConfig(crop.x, crop.y, crop.w, aspectRatio, img, brightness, opacity); updateConfig(p); onClose(); };
-  const handleRemove = () => {
-    resetConfig(); setImg(null); setCrop({ x: 0, y: 0, w: 1, h: 1 / aspectRatio }); setBrightness(100); setOpacity(30);
-  };
+  const handleSave = () => { apply(crop.x, crop.y, crop.w, crop.h); onClose(); };
+  const handleRemove = () => { resetConfig(); setImg(null); setCrop({ x: 0, y: 0, w: 1, h: 1 }); setBrightness(100); setOpacity(30); };
 
-  // ── Drag logic for crop rect ───────────────────────────────────
+  // ── Drag logic — free-form, opposite corner stays fixed ────────
 
   const dragRef = useRef<{
-    handle: Handle;
-    startMouseX: number;
-    startMouseY: number;
-    startCropX: number;
-    startCropY: number;
-    startCropW: number;
+    corner: Corner | 'center';
+    oppX: number;  // opposite corner (fixed) as fraction
+    oppY: number;
+    startCropX: number; startCropY: number; startCropW: number; startCropH: number;
   } | null>(null);
 
-  const getHandle = (e: React.MouseEvent): Handle => {
-    const el = containerRef.current;
-    if (!el) return 'center';
-    const rect = el.getBoundingClientRect();
-    const rx = (e.clientX - rect.left) / rect.width;
-    const ry = (e.clientY - rect.top) / rect.height;
-    const margin = 0.03; // 3% handle hit area
-
-    const left = Math.abs(rx - crop.x) < margin;
-    const right = Math.abs(rx - (crop.x + crop.w)) < margin;
-    const top = Math.abs(ry - crop.y) < margin;
-    const bottom = Math.abs(ry - (crop.y + crop.h)) < margin;
-    const inRect = rx > crop.x - margin && rx < crop.x + crop.w + margin &&
-                   ry > crop.y - margin && ry < crop.y + crop.h + margin;
-
-    if (!inRect) return 'center'; // fallback, should not happen
-    if (top && left) return 'tl';
-    if (top && right) return 'tr';
-    if (bottom && left) return 'bl';
-    if (bottom && right) return 'br';
-    if (top) return 'tm';
-    if (bottom) return 'bm';
-    if (left) return 'ml';
-    if (right) return 'mr';
-    return 'center';
+  const detectCorner = (rx: number, ry: number): Corner | 'center' | null => {
+    const margin = 0.04;
+    const corners: Record<Corner, { x: number; y: number }> = {
+      tl: { x: crop.x, y: crop.y },
+      tr: { x: crop.x + crop.w, y: crop.y },
+      bl: { x: crop.x, y: crop.y + crop.h },
+      br: { x: crop.x + crop.w, y: crop.y + crop.h },
+    };
+    for (const [key, pos] of Object.entries(corners)) {
+      if (Math.abs(rx - pos.x) < margin && Math.abs(ry - pos.y) < margin) return key as Corner;
+    }
+    if (rx > crop.x && rx < crop.x + crop.w && ry > crop.y && ry < crop.y + crop.h) return 'center';
+    return null;
   };
 
   const onMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const handle = getHandle(e);
-    dragRef.current = {
-      handle,
-      startMouseX: e.clientX,
-      startMouseY: e.clientY,
-      startCropX: crop.x,
-      startCropY: crop.y,
-      startCropW: crop.w,
-    };
-  };
-
-  const clampCrop = (x: number, y: number, w: number, ar: number) => {
-    const minW = 0.1;
-    w = Math.max(minW, Math.min(1, w));
-    const h2 = w / ar;
-    x = Math.max(0, Math.min(1 - w, x));
-    y = Math.max(0, Math.min(1 - h2, y));
-    return { x, y, w, h: h2 };
-  };
-
-  const onMouseMove = (e: React.MouseEvent) => {
-    const d = dragRef.current;
-    if (!d) return;
-
     const el = containerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    const dx = (e.clientX - d.startMouseX) / rect.width;
-    const dy = (e.clientY - d.startMouseY) / rect.height;
+    const rx = (e.clientX - rect.left) / rect.width;
+    const ry = (e.clientY - rect.top) / rect.height;
+    const hit = detectCorner(rx, ry);
+    if (!hit) return;
+    e.preventDefault();
 
-    let nx = d.startCropX, ny = d.startCropY, nw = d.startCropW;
+    const opp: Record<string, { x: number; y: number }> = {
+      tl: { x: crop.x + crop.w, y: crop.y + crop.h },
+      tr: { x: crop.x, y: crop.y + crop.h },
+      bl: { x: crop.x + crop.w, y: crop.y },
+      br: { x: crop.x, y: crop.y },
+      center: { x: crop.x, y: crop.y },
+    };
 
-    switch (d.handle) {
-      case 'center':
-        nx = d.startCropX + dx;
-        ny = d.startCropY + dy;
-        break;
-      case 'tl':
-        nw = d.startCropW - dx;
-        nx = d.startCropX + dx;
-        ny = d.startCropY + dx / aspectRatio; // maintain aspect ratio for corner
-        { const dh = (d.startCropW - nw) / aspectRatio; ny = d.startCropY + dh; }
-        break;
-      case 'tr':
-        nw = d.startCropW + dx;
-        ny = d.startCropY - dx / aspectRatio;
-        break;
-      case 'bl':
-        nw = d.startCropW - dx;
-        nx = d.startCropX + dx;
-        break;
-      case 'br':
-        nw = d.startCropW + dx;
-        break;
-      case 'tm':
-        ny = d.startCropY + dy;
-        nw = d.startCropW - dy * aspectRatio;
-        break;
-      case 'bm':
-        nw = d.startCropW + dy * aspectRatio;
-        break;
-      case 'ml':
-        nw = d.startCropW - dx;
-        nx = d.startCropX + dx;
-        break;
-      case 'mr':
-        nw = d.startCropW + dx;
-        break;
+    dragRef.current = {
+      corner: hit,
+      oppX: opp[hit].x,
+      oppY: opp[hit].y,
+      startCropX: crop.x, startCropY: crop.y, startCropW: crop.w, startCropH: crop.h,
+      _startRX: rx, _startRY: ry,  // store start mouse position for center drag
+    } as any;
+  };
+
+  const onMouseMove = (e: React.MouseEvent) => {
+    const d = dragRef.current as any;
+    if (!d) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const rx = (e.clientX - rect.left) / rect.width;
+    const ry = (e.clientY - rect.top) / rect.height;
+
+    let nx = crop.x, ny = crop.y, nw = crop.w, nh = crop.h;
+
+    if (d.corner === 'center') {
+      const dx = rx - d._startRX;
+      const dy = ry - d._startRY;
+      nx = d.startCropX + dx;
+      ny = d.startCropY + dy;
+      nw = d.startCropW;
+      nh = d.startCropH;
+      // Clamp to keep rect within [0,1]
+      nx = Math.max(0, Math.min(1 - nw, nx));
+      ny = Math.max(0, Math.min(1 - nh, ny));
+    } else {
+      const oppX = d.oppX, oppY = d.oppY;
+      nx = Math.min(rx, oppX);
+      ny = Math.min(ry, oppY);
+      nw = Math.abs(rx - oppX);
+      nh = Math.abs(ry - oppY);
+      if (nw < 0.02) nw = 0.02;
+      if (nh < 0.02) nh = 0.02;
+      // Recompute nx,ny from opposite
+      if (rx > oppX) nx = oppX; else nx = oppX - nw;
+      if (ry > oppY) ny = oppY; else ny = oppY - nh;
+      nx = Math.max(0, nx); ny = Math.max(0, ny);
+      nw = Math.min(1 - nx, nw); nh = Math.min(1 - ny, nh);
     }
 
-    const clamped = clampCrop(nx, ny, nw, aspectRatio);
-    setCrop(clamped);
-    applyPreview(clamped.x, clamped.y, clamped.w);
+    d._lastRX = rx; d._lastRY = ry;
+    setCrop({ x: nx, y: ny, w: nw, h: nh });
+    apply(nx, ny, nw, nh);
   };
 
   const onMouseUp = () => { dragRef.current = null; };
 
-  // Touch support
-  const touchRef = useRef<{ id: number | null; startX: number; startY: number; startCropX: number; startCropY: number; startCropW: number; handle: Handle } | null>(null);
-
-  const onTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length !== 1) return;
-    const t = e.touches[0];
-    const el = containerRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const rx = (t.clientX - rect.left) / rect.width;
-    const ry = (t.clientY - rect.top) / rect.height;
-    const margin = 0.04; // slightly larger for touch
-    const left = Math.abs(rx - crop.x) < margin;
-    const right = Math.abs(rx - (crop.x + crop.w)) < margin;
-    const top = Math.abs(ry - crop.y) < margin;
-    const bottom = Math.abs(ry - (crop.y + crop.h)) < margin;
-    const inRect = rx > crop.x - margin && rx < crop.x + crop.w + margin &&
-                   ry > crop.y - margin && ry < crop.y + crop.h + margin;
-    if (!inRect) return;
-
-    let handle: Handle = 'center';
-    if (top && left) handle = 'tl';
-    else if (top && right) handle = 'tr';
-    else if (bottom && left) handle = 'bl';
-    else if (bottom && right) handle = 'br';
-    else if (top) handle = 'tm';
-    else if (bottom) handle = 'bm';
-    else if (left) handle = 'ml';
-    else if (right) handle = 'mr';
-
-    touchRef.current = { id: t.identifier, startX: t.clientX, startY: t.clientY, startCropX: crop.x, startCropY: crop.y, startCropW: crop.w, handle };
-  };
-
-  const onTouchMove = (e: React.TouchEvent) => {
-    const td = touchRef.current;
-    if (!td) return;
-    const t = Array.from(e.touches).find(t => t.identifier === td.id);
-    if (!t) return;
-    const el = containerRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const dx = (t.clientX - td.startX) / rect.width;
-    const dy = (t.clientY - td.startY) / rect.height;
-    // Same logic as mouse move — simplified: just drag 'center' style for touch
-    let nx = td.startCropX + dx, ny = td.startCropY + dy, nw = td.startCropW;
-    if (td.handle === 'br') nw = td.startCropW + dx;
-    else if (td.handle === 'mr') nw = td.startCropW + dx;
-    else if (td.handle === 'tr') { nw = td.startCropW + dx; ny = td.startCropY - dx / aspectRatio; }
-    else if (td.handle === 'tl') { nw = td.startCropW - dx; nx = td.startCropX + dx; ny = td.startCropY + dx / aspectRatio; }
-    else if (td.handle === 'bl') { nw = td.startCropW - dx; nx = td.startCropX + dx; }
-    else if (td.handle === 'tm') { ny = td.startCropY + dy; nw = td.startCropW - dy * aspectRatio; }
-    else if (td.handle === 'bm') { nw = td.startCropW + dy * aspectRatio; }
-    else if (td.handle === 'ml') { nw = td.startCropW - dx; nx = td.startCropX + dx; }
-    const clamped = clampCrop(nx, ny, nw, aspectRatio);
-    setCrop(clamped);
-    applyPreview(clamped.x, clamped.y, clamped.w);
-  };
-
-  const onTouchEnd = () => { touchRef.current = null; };
-
   // ── Render ─────────────────────────────────────────────────────
 
   const labelCls = "block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5";
-
-  const ch = crop.w / aspectRatio;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 md:rounded-xl
                       w-full max-w-xl md:mx-4 shadow-2xl h-full md:max-h-[95vh] overflow-y-auto"
            onClick={e => e.stopPropagation()}>
-        {/* Header */}
         <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-900 z-10">
           <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-200">Chat Background</h3>
           <button onClick={onClose} className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300">
@@ -289,67 +167,64 @@ export function BackgroundSettings({ onClose }: Props) {
 
         <div className="p-4 space-y-5">
           <div>
-            <label className={labelCls}>Crop & Position</label>
+            <label className={labelCls}>Crop — drag corners (opposite stays fixed) or center to move</label>
             {img ? (
               <div
                 ref={containerRef}
-                className="relative w-full rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800 select-none"
-                style={{ aspectRatio: `${aspectRatio}` }}
+                className="relative w-full rounded-lg overflow-hidden bg-gray-800 select-none"
                 onMouseDown={onMouseDown}
                 onMouseMove={onMouseMove}
                 onMouseUp={onMouseUp}
                 onMouseLeave={onMouseUp}
-                onTouchStart={onTouchStart}
-                onTouchMove={onTouchMove}
-                onTouchEnd={onTouchEnd}
               >
-                {/* The full image — fitted to container */}
+                {/* Image — contain so the full image is always visible */}
                 <img
                   src={img}
                   alt=""
                   draggable={false}
-                  className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-                  style={{ filter: `brightness(${brightness}%)`, opacity: opacity / 100 }}
+                  className="w-full h-auto block pointer-events-none"
+                  style={{ filter: `brightness(${brightness}%)` }}
                 />
 
-                {/* Dark mask outside the crop rect */}
-                {/* Top mask */}
-                <div className="absolute inset-x-0 top-0 bg-black/50 pointer-events-none" style={{ height: `${crop.y * 100}%` }} />
-                {/* Bottom mask */}
-                <div className="absolute inset-x-0 bottom-0 bg-black/50 pointer-events-none" style={{ height: `${(1 - crop.y - ch) * 100}%` }} />
-                {/* Left mask */}
-                <div className="absolute inset-y-0 left-0 bg-black/50 pointer-events-none" style={{ width: `${crop.x * 100}%` }} />
-                {/* Right mask */}
-                <div className="absolute inset-y-0 right-0 bg-black/50 pointer-events-none" style={{ width: `${(1 - crop.x - crop.w) * 100}%` }} />
+                {/* Crop overlay — absolute positioned over the image */}
+                <div className="absolute inset-0">
+                  {/* Dark masks */}
+                  <div className="absolute inset-0 bg-black/50" />
+                  <div
+                    className="absolute border-2 border-purple-400"
+                    style={{
+                      left: `${crop.x * 100}%`, top: `${crop.y * 100}%`,
+                      width: `${crop.w * 100}%`, height: `${crop.h * 100}%`,
+                      boxShadow: '0 0 0 9999px rgba(0,0,0,0.45)',
+                    }}
+                  >
+                    {/* Grid lines */}
+                    <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none">
+                      {Array.from({ length: 9 }).map((_, i) => (
+                        <div key={i} className="border-[0.5px] border-white/25" />
+                      ))}
+                    </div>
 
-                {/* Crop frame border */}
-                <div
-                  className="absolute border-2 border-purple-400 shadow-[0_0_0_1px_rgba(168,85,247,0.3)] pointer-events-none"
-                  style={{ left: `${crop.x * 100}%`, top: `${crop.y * 100}%`, width: `${crop.w * 100}%`, height: `${ch * 100}%` }}
-                >
-                  {/* Grid lines */}
-                  <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none">
-                    {Array.from({ length: 9 }).map((_, i) => (
-                      <div key={i} className="border-[0.5px] border-white/20" />
-                    ))}
+                    {/* Corner handles */}
+                    {(['tl', 'tr', 'bl', 'br'] as Corner[]).map(cn => {
+                      const corners: Record<Corner, string> = {
+                        tl: 'top-0 left-0 -translate-x-1/2 -translate-y-1/2',
+                        tr: 'top-0 right-0 translate-x-1/2 -translate-y-1/2',
+                        bl: 'bottom-0 left-0 -translate-x-1/2 translate-y-1/2',
+                        br: 'bottom-0 right-0 translate-x-1/2 translate-y-1/2',
+                      };
+                      return (
+                        <div key={cn}
+                          className={`absolute ${corners[cn]} w-4 h-4 bg-white border-2 border-purple-500 rounded-sm cursor-nwse-resize shadow z-10`}
+                        />
+                      );
+                    })}
                   </div>
                 </div>
 
-                {/* Corner + edge handles */}
-                {(['tl', 'tm', 'tr', 'ml', 'mr', 'bl', 'bm', 'br'] as Handle[]).map(hnd => {
-                  const pos = handlePosition(hnd, crop.x, crop.y, crop.w, ch);
-                  return (
-                    <div
-                      key={hnd}
-                      className="absolute w-3 h-3 bg-white border-2 border-purple-500 rounded-sm shadow cursor-pointer z-10"
-                      style={{ left: pos.left, top: pos.top, transform: 'translate(-50%, -50%)' }}
-                    />
-                  );
-                })}
-
                 {/* Hint */}
-                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] text-white/70 bg-black/50 px-2 py-1 rounded pointer-events-none">
-                  Drag corners/edges to resize · Drag center to move
+                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] text-white/70 bg-black/50 px-2 py-1 rounded pointer-events-none z-20">
+                  Drag corners to crop · Drag center to move
                 </div>
               </div>
             ) : (
@@ -370,7 +245,7 @@ export function BackgroundSettings({ onClose }: Props) {
           <div>
             <label className={labelCls}>Brightness <span className="text-gray-400 dark:text-gray-600 font-mono">({brightness}%)</span></label>
             <input type="range" min={0} max={200} value={brightness}
-                   onChange={e => { const v = Number(e.target.value); setBrightness(v); applyPreview(crop.x, crop.y, crop.w); }}
+                   onChange={e => { const v = Number(e.target.value); setBrightness(v); apply(crop.x, crop.y, crop.w, crop.h); }}
                    className="w-full accent-purple-500" />
           </div>
 
@@ -378,12 +253,11 @@ export function BackgroundSettings({ onClose }: Props) {
           <div>
             <label className={labelCls}>Opacity <span className="text-gray-400 dark:text-gray-600 font-mono">({opacity}%)</span></label>
             <input type="range" min={0} max={100} value={opacity}
-                   onChange={e => { const v = Number(e.target.value); setOpacity(v); applyPreview(crop.x, crop.y, crop.w); }}
+                   onChange={e => { const v = Number(e.target.value); setOpacity(v); apply(crop.x, crop.y, crop.w, crop.h); }}
                    className="w-full accent-purple-500" />
           </div>
         </div>
 
-        {/* Footer */}
         <div className="p-4 border-t border-gray-200 dark:border-gray-800 flex justify-between sticky bottom-0 bg-white dark:bg-gray-900">
           <button onClick={handleRemove} className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded-lg transition-colors">Reset</button>
           <div className="flex gap-2">
@@ -394,20 +268,4 @@ export function BackgroundSettings({ onClose }: Props) {
       </div>
     </div>
   );
-}
-
-/* ── Handle position helper ─────────────────────────────────────── */
-
-function handlePosition(h: Handle, x: number, y: number, w: number, hh: number) {
-  switch (h) {
-    case 'tl': return { left: `${x * 100}%`, top: `${y * 100}%` };
-    case 'tm': return { left: `${(x + w / 2) * 100}%`, top: `${y * 100}%` };
-    case 'tr': return { left: `${(x + w) * 100}%`, top: `${y * 100}%` };
-    case 'ml': return { left: `${x * 100}%`, top: `${(y + hh / 2) * 100}%` };
-    case 'mr': return { left: `${(x + w) * 100}%`, top: `${(y + hh / 2) * 100}%` };
-    case 'bl': return { left: `${x * 100}%`, top: `${(y + hh) * 100}%` };
-    case 'bm': return { left: `${(x + w / 2) * 100}%`, top: `${(y + hh) * 100}%` };
-    case 'br': return { left: `${(x + w) * 100}%`, top: `${(y + hh) * 100}%` };
-    default: return { left: '0', top: '0' };
-  }
 }
