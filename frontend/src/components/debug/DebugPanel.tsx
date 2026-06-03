@@ -68,14 +68,15 @@ function DebugPanelInner({ turnId, onClose }: { turnId: string; onClose: () => v
   const activeData = tab === 'request' ? rawRequest : rawResponse;
 
   return (
-    <div className="fixed inset-0 z-40 flex flex-col md:flex-row">
-      {/* Backdrop — always visible to absorb touches */}
-      <div className="flex-1 bg-black/40" onClick={onClose} />
+    <div className="fixed inset-0 z-40 md:flex md:flex-row">
+      {/* Backdrop — full-screen overlay on mobile; left portion on desktop */}
+      <div className="absolute inset-0 md:static md:flex-1 bg-black/40" onClick={onClose} />
 
       {/* Panel — bottom sheet on mobile, side panel on desktop */}
-      <div className="mt-20 md:mt-0 w-full md:w-[560px] md:max-w-[90vw] bg-gray-950
-                      border-t md:border-l md:border-t-0 border-gray-800 flex flex-col shadow-2xl
-                      rounded-t-xl md:rounded-none flex-1 md:flex-none
+      <div className="absolute inset-x-0 bottom-0 max-h-[85vh]
+                      md:static md:inset-auto md:w-[560px] md:max-w-[90vw] md:max-h-none
+                      bg-gray-950 border-t md:border-l md:border-t-0 border-gray-800
+                      flex flex-col shadow-2xl rounded-t-xl md:rounded-none
                       animate-[slideUp_0.25s_ease-out] md:animate-[slideIn_0.2s_ease-out]">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 shrink-0">
