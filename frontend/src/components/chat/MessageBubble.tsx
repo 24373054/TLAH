@@ -3,9 +3,12 @@ import type { Message } from '../../types';
 
 export function MessageBubble({ message }: { message: Message }) {
   const { toggleDebug } = useDebugPanel();
-  const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
-  const hasDebug = !!message.turn_id; // Only assistant+user messages in a turn have debug data
+  const isAssistant = message.role === 'assistant';
+  // Everything that isn't system or assistant is a "user" message —
+  // this lets the custom user_role (e.g. "human", "customer") work.
+  const isUser = !isSystem && !isAssistant;
+  const hasDebug = !!message.turn_id;
 
   if (isSystem) {
     return (
@@ -18,7 +21,13 @@ export function MessageBubble({ message }: { message: Message }) {
   }
 
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} group`}>
+    <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} group`}>
+      {/* Role label */}
+      <span className={`text-[10px] px-1 mb-0.5 font-mono
+        ${isUser ? 'text-gray-600' : 'text-gray-600'}`}>
+        {message.role}
+      </span>
+
       <div
         className={`relative max-w-[75%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed
           ${isUser
@@ -31,8 +40,8 @@ export function MessageBubble({ message }: { message: Message }) {
           {message.content}
         </div>
 
-        {/* Debug inspect button — shown on hover for messages with turn data */}
-        {hasDebug && !isUser && (
+        {/* Debug inspect button — shown on hover for assistant messages */}
+        {hasDebug && isAssistant && (
           <button
             onClick={() => toggleDebug(message.turn_id!)}
             className="absolute -right-8 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100

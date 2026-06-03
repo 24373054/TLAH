@@ -34,6 +34,7 @@ def get_global_settings_masked(db: Session) -> dict:
         "temperature": gs.temperature,
         "max_tokens": gs.max_tokens,
         "system_prompt": gs.system_prompt,
+        "user_role": gs.user_role,
     }
 
 
@@ -42,9 +43,17 @@ def get_global_settings_raw(db: Session) -> GlobalSettings:
     return get_global_settings(db)
 
 
+def _is_masked(value: str) -> bool:
+    """True if the value looks like the masked API key (contains * characters)."""
+    return "*" in value
+
+
 def update_global_settings(db: Session, data: GlobalSettingsUpdate) -> GlobalSettings:
     gs = get_global_settings(db)
     for field, value in data.model_dump(exclude_unset=True).items():
+        # Never overwrite API key with the masked version sent back from the frontend
+        if field == "api_key" and isinstance(value, str) and _is_masked(value):
+            continue
         setattr(gs, field, value)
     db.commit()
     db.refresh(gs)
@@ -68,6 +77,8 @@ def get_or_create_chat_settings(db: Session, chat_id: str) -> ChatSettings:
 def update_chat_settings(db: Session, chat_id: str, data: ChatSettingsUpdate) -> ChatSettings:
     cs = get_or_create_chat_settings(db, chat_id)
     for field, value in data.model_dump(exclude_unset=True).items():
+        if field == "api_key" and isinstance(value, str) and _is_masked(value):
+            continue
         setattr(cs, field, value)
     db.commit()
     db.refresh(cs)
@@ -84,6 +95,7 @@ class EffectiveSettings:
     temperature: float
     max_tokens: int
     system_prompt: str
+    user_role: str
 
 
 def get_effective_settings(db: Session, chat_id: str) -> EffectiveSettings:
@@ -97,5 +109,6 @@ def get_effective_settings(db: Session, chat_id: str) -> EffectiveSettings:
         model=cs.model if cs and cs.model else gs.model,
         temperature=cs.temperature if cs and cs.temperature is not None else gs.temperature,
         max_tokens=cs.max_tokens if cs and cs.max_tokens is not None else gs.max_tokens,
-        system_prompt=gs.system_prompt,  # Global system prompt is base; chat override handled separately
+        system_prompt=gs.system_prompt,
+        user_role=cs.user_role if cs and cs.user_role else gs.user_role,
     )

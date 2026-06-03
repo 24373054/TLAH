@@ -50,6 +50,7 @@ class ChatDetail(ChatResponse):
 
 class SendMessageRequest(BaseModel):
     content: str
+    role: str | None = None  # If None, uses effective user_role; set "system" to inject a system message
 
 
 class SendMessageResponse(BaseModel):

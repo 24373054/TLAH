@@ -27,6 +27,7 @@ class GlobalSettings(Base):
     temperature: Mapped[float] = mapped_column(Float, default=0.7)
     max_tokens: Mapped[int] = mapped_column(Integer, default=4096)
     system_prompt: Mapped[str] = mapped_column(Text, default="You are a helpful assistant.")
+    user_role: Mapped[str] = mapped_column(String(50), default="user")
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
@@ -42,6 +43,7 @@ class ChatSettings(Base):
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     temperature: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    user_role: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
 
 class AgentFile(Base):

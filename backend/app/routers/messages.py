@@ -16,7 +16,7 @@ def post_message(chat_id: str, body: SendMessageRequest, db: Session = Depends(g
     and the COMPLETE raw response received. These are available via
     the debug endpoints: GET /api/turns/{turn_id}/raw-{request,response}
     """
-    result = send_message(db=db, chat_id=chat_id, user_content=body.content)
+    result = send_message(db=db, chat_id=chat_id, user_content=body.content, role=body.role)
     return SendMessageResponse(
         turn_id=result.turn.id,
         user_message=MessageResponse.model_validate(result.user_message),

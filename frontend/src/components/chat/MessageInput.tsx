@@ -1,12 +1,19 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
 import { useChat } from '../../contexts/ChatContext';
+import { useSettings } from '../../contexts/SettingsContext';
 import { Spinner } from '../common/Spinner';
 
 export function MessageInput() {
   const { state, sendMessage } = useChat();
+  const { globalSettings } = useSettings();
   const { sending, currentChatId } = state;
   const [input, setInput] = useState('');
+  const [role, setRole] = useState<string | null>(null); // null = use default user_role
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const effectiveUserRole = globalSettings?.user_role ?? 'user';
+  const activeRole = role ?? effectiveUserRole;
+  const isSystem = activeRole === 'system';
 
   // Auto-resize textarea
   useEffect(() => {
@@ -21,7 +28,7 @@ export function MessageInput() {
     const trimmed = input.trim();
     if (!trimmed || sending || !currentChatId) return;
     setInput('');
-    await sendMessage(trimmed);
+    await sendMessage(trimmed, activeRole !== effectiveUserRole ? activeRole : undefined);
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -33,28 +40,57 @@ export function MessageInput() {
 
   if (!currentChatId) return null;
 
+  const roleOptions = [
+    { label: effectiveUserRole, value: null, color: 'text-gray-400' },
+    { label: 'system', value: 'system', color: 'text-yellow-400' },
+  ];
+
   return (
     <div className="border-t border-gray-800 px-4 py-3 shrink-0">
-      <div className="max-w-3xl mx-auto flex items-end gap-3">
+      <div className="max-w-3xl mx-auto flex items-end gap-2">
+        {/* Role selector */}
+        <div className="flex gap-0.5 shrink-0">
+          {roleOptions.map(opt => (
+            <button
+              key={opt.label}
+              onClick={() => setRole(opt.value)}
+              className={`px-2 py-1 rounded text-[10px] font-mono font-medium transition-colors
+                ${activeRole === (opt.value ?? effectiveUserRole)
+                  ? 'bg-gray-700 text-gray-200'
+                  : 'bg-gray-900 text-gray-600 hover:text-gray-400'
+                }`}
+              title={opt.value === 'system' ? 'Send as system message' : `Send as "${effectiveUserRole}"`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
         <textarea
           ref={textareaRef}
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Type a message... (Enter to send, Shift+Enter for newline)"
+          placeholder={isSystem ? 'System message... (Enter to send)' : 'Type a message... (Enter to send, Shift+Enter for newline)'}
           rows={1}
           disabled={sending}
-          className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5
-                     text-sm text-gray-100 placeholder-gray-500
-                     focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30
-                     resize-none disabled:opacity-50 transition-colors"
+          className={`flex-1 bg-gray-800 border rounded-xl px-4 py-2.5 text-sm
+                     placeholder-gray-500 resize-none disabled:opacity-50 transition-colors
+                     focus:outline-none focus:ring-1
+                     ${isSystem
+                       ? 'border-yellow-700/50 text-yellow-100 focus:border-yellow-500 focus:ring-yellow-500/30'
+                       : 'border-gray-700 text-gray-100 focus:border-purple-500 focus:ring-purple-500/30'
+                     }`}
         />
         <button
           onClick={handleSend}
           disabled={sending || !input.trim()}
-          className="shrink-0 p-2.5 rounded-xl bg-purple-600 hover:bg-purple-500
-                     disabled:bg-gray-800 disabled:text-gray-600 text-white
-                     transition-colors duration-150 disabled:cursor-not-allowed"
+          className={`shrink-0 p-2.5 rounded-xl font-medium transition-colors duration-150
+                     disabled:cursor-not-allowed
+                     ${isSystem
+                       ? 'bg-yellow-600 hover:bg-yellow-500 disabled:bg-gray-800 text-white'
+                       : 'bg-purple-600 hover:bg-purple-500 disabled:bg-gray-800 text-white'
+                     }`}
         >
           {sending ? (
             <Spinner className="w-5 h-5" />
@@ -66,7 +102,10 @@ export function MessageInput() {
           )}
         </button>
       </div>
-      <p className="text-[11px] text-gray-600 text-center mt-2">
+      <p className="text-[11px] text-gray-600 text-center mt-2 flex items-center justify-center gap-2">
+        <span className={`font-mono ${activeRole === 'system' ? 'text-yellow-500' : 'text-gray-500'}`}>
+          [{activeRole}]
+        </span>
         Press <kbd className="px-1 py-0.5 bg-gray-800 rounded text-gray-400 font-mono">Enter</kbd> to send
         · <kbd className="px-1 py-0.5 bg-gray-800 rounded text-gray-400 font-mono">Shift+Enter</kbd> for newline
       </p>

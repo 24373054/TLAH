@@ -13,6 +13,7 @@ export interface GlobalSettings {
   temperature: number;
   max_tokens: number;
   system_prompt: string;
+  user_role: string;
 }
 
 export interface GlobalSettingsUpdate {
@@ -23,6 +24,7 @@ export interface GlobalSettingsUpdate {
   temperature?: number;
   max_tokens?: number;
   system_prompt?: string;
+  user_role?: string;
 }
 
 export interface ChatSettings {
@@ -32,6 +34,7 @@ export interface ChatSettings {
   model: string | null;
   temperature: number | null;
   max_tokens: number | null;
+  user_role: string | null;
 }
 
 export interface ChatSettingsUpdate {
@@ -41,6 +44,7 @@ export interface ChatSettingsUpdate {
   model?: string | null;
   temperature?: number | null;
   max_tokens?: number | null;
+  user_role?: string | null;
 }
 
 export interface AgentFileData {

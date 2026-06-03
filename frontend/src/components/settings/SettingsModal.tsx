@@ -38,8 +38,14 @@ export function SettingsModal({ onClose }: Props) {
     if (!form) return;
     setSaving(true);
     setMessage(null);
+
+    // If the api_key hasn't been touched (still the masked "sk-...****...xxxx" form),
+    // strip it from the payload so we don't overwrite the real key on the server.
+    const { api_key, ...rest } = form;
+    const payload = (api_key && api_key.includes('*')) ? rest : form;
+
     try {
-      await saveGlobalSettings(form);
+      await saveGlobalSettings(payload);
       setMessage('Settings saved successfully!');
       setTimeout(() => {
         setMessage(null);
@@ -169,6 +175,27 @@ export function SettingsModal({ onClose }: Props) {
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100
                          font-mono focus:outline-none focus:border-purple-500"
             />
+          </div>
+
+          {/* User Role */}
+          <div>
+            <label className="block text-xs font-medium text-gray-400 mb-2">
+              User Role Name
+              <span className="text-gray-600 font-normal ml-1">
+                — the "role" field value for your messages in API calls
+              </span>
+            </label>
+            <input
+              type="text"
+              value={form.user_role}
+              onChange={e => setForm({ ...form, user_role: e.target.value })}
+              placeholder="user"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100
+                         font-mono focus:outline-none focus:border-purple-500 placeholder:text-gray-600"
+            />
+            <p className="text-[10px] text-gray-600 mt-1">
+              Standard is "user". Try "human", "customer", or any custom name for prompt experiments.
+            </p>
           </div>
 
           {/* Temperature & Max Tokens row */}

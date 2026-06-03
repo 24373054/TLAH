@@ -67,10 +67,10 @@ export function deleteChat(id: string): Promise<void> {
 
 // ── Messages ───────────────────────────────────────────────────────
 
-export function sendMessage(chatId: string, content: string): Promise<SendMessageResponse> {
+export function sendMessage(chatId: string, content: string, role?: string): Promise<SendMessageResponse> {
   return request(`/chats/${chatId}/messages`, {
     method: 'POST',
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, ...(role ? { role } : {}) }),
   });
 }
 

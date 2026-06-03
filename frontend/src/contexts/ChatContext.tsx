@@ -65,7 +65,7 @@ interface ChatContextValue {
   selectChat: (id: string) => Promise<void>;
   createChat: () => Promise<ChatDetail | null>;
   deleteChat: (id: string) => Promise<void>;
-  sendMessage: (content: string) => Promise<SendMessageResponse | null>;
+  sendMessage: (content: string, role?: string) => Promise<SendMessageResponse | null>;
   updateSystemPrompt: (prompt: string) => Promise<void>;
   updateTitle: (title: string) => Promise<void>;
 }
@@ -122,12 +122,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const sendMessage = useCallback(async (content: string): Promise<SendMessageResponse | null> => {
+  const sendMessage = useCallback(async (content: string, role?: string): Promise<SendMessageResponse | null> => {
     if (!state.currentChatId) return null;
     dispatch({ type: 'SET_SENDING', sending: true });
     dispatch({ type: 'SET_ERROR', error: null });
     try {
-      const result = await api.sendMessage(state.currentChatId, content);
+      const result = await api.sendMessage(state.currentChatId, content, role);
       dispatch({ type: 'ADD_MESSAGES', userMsg: result.user_message, assistantMsg: result.assistant_message });
       await loadChats(); // Refresh sidebar (updated_at, message count)
       return result;

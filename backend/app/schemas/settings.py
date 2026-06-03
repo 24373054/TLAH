@@ -40,6 +40,7 @@ class GlobalSettingsResponse(BaseModel):
     temperature: float
     max_tokens: int
     system_prompt: str
+    user_role: str
 
     model_config = {"from_attributes": True}
 
@@ -52,6 +53,7 @@ class GlobalSettingsUpdate(BaseModel):
     temperature: float | None = None
     max_tokens: int | None = None
     system_prompt: str | None = None
+    user_role: str | None = None
 
 
 class ChatSettingsResponse(BaseModel):
@@ -61,6 +63,7 @@ class ChatSettingsResponse(BaseModel):
     model: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None
+    user_role: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -72,6 +75,7 @@ class ChatSettingsUpdate(BaseModel):
     model: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None
+    user_role: str | None = None
 
 
 class AgentFileResponse(BaseModel):

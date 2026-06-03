@@ -22,10 +22,15 @@ class SendMessageResult:
 
 
 def _build_messages_for_llm(db: Session, chat_id: str) -> list[dict[str, str]]:
-    """Build the message history list (user/assistant pairs only, no system prompt)."""
+    """Build the message history list.
+
+    Includes ALL message roles (user, assistant, AND system) so that
+    system messages injected mid-conversation persist and are sent to
+    the LLM in chronological order.
+    """
     messages = (
         db.query(Message)
-        .filter(Message.chat_id == chat_id, Message.role.in_(["user", "assistant"]))
+        .filter(Message.chat_id == chat_id)
         .order_by(Message.sequence_num)
         .all()
     )
@@ -49,6 +54,7 @@ def send_message(
     db: Session,
     chat_id: str,
     user_content: str,
+    role: str | None = None,
 ) -> SendMessageResult:
     """
     THE CORE ORCHESTRATION FUNCTION.
@@ -57,15 +63,15 @@ def send_message(
     1. Load chat + history
     2. Build effective system prompt (with agent file)
     3. Create Turn record
-    4. Save user message
+    4. Save message (with requested role, or effective.user_role)
     5. Build raw request payload
     6. Call LLM provider via raw HTTP
     7. Store raw request + raw response in DB
     8. Save assistant message
     9. Commit and return everything
 
-    On error, we STILL store raw_request and raw_response (with error info)
-    so the user can debug what went wrong via the Debug panel.
+    If `role` is "system", the message is persisted as a system message
+    and will appear in future turns' message history.
     """
     from fastapi import HTTPException
 
@@ -76,34 +82,37 @@ def send_message(
     # 1. Build effective settings
     effective = get_effective_settings(db, chat_id)
 
-    # 2. Build message history (before adding the new user message)
+    # 2. Build message history (before adding the new message)
     prior_messages = _build_messages_for_llm(db, chat_id)
 
     # 3. Build system prompt
     system_prompt = _build_system_prompt(db, chat, effective)
 
-    # 4. Determine turn number
+    # 4. Determine the role to use
+    msg_role = role if role else effective.user_role
+
+    # 5. Determine turn number
     turn_count = db.query(Turn).filter(Turn.chat_id == chat_id).count()
     turn_number = turn_count + 1
 
-    # 5. Create Turn
+    # 6. Create Turn
     turn = Turn(chat_id=chat_id, turn_number=turn_number)
     db.add(turn)
     db.flush()  # Get turn.id
 
-    # 6. Save user message
+    # 7. Save the outgoing message (system / user / custom role)
     seq = get_next_sequence(db, chat_id)
-    user_message = Message(
+    sent_message = Message(
         chat_id=chat_id,
-        role="user",
+        role=msg_role,
         content=user_content,
         turn_id=turn.id,
         sequence_num=seq,
     )
-    db.add(user_message)
+    db.add(sent_message)
     db.flush()
 
-    # 7. Create LLM provider
+    # 8. Create LLM provider
     provider = create_provider(
         provider_name=effective.provider,
         api_key=effective.api_key,
@@ -111,9 +120,9 @@ def send_message(
         model=effective.model,
     )
 
-    # 8. Build the full messages list for the LLM call
-    # (prior messages + the new user message)
-    messages_for_llm = prior_messages + [{"role": "user", "content": user_content}]
+    # 9. Build the full messages list for the LLM call
+    # (prior messages + the new message, using the requested role)
+    messages_for_llm = prior_messages + [{"role": msg_role, "content": user_content}]
 
     # 9. Call the LLM
     import asyncio
@@ -137,7 +146,7 @@ def send_message(
         )
     )
 
-    # 10. Store raw request
+    # 11. Store raw request
     raw_request = RawRequest(
         turn_id=turn.id,
         provider=provider.provider_name(),
@@ -146,7 +155,7 @@ def send_message(
     )
     db.add(raw_request)
 
-    # 11. Store raw response
+    # 12. Store raw response
     raw_response = RawResponse(
         turn_id=turn.id,
         provider=provider.provider_name(),
@@ -157,7 +166,7 @@ def send_message(
     )
     db.add(raw_response)
 
-    # 12. Save assistant message
+    # 13. Save assistant message
     assistant_content = llm_result.assistant_text
     ass_message = Message(
         chat_id=chat_id,
@@ -168,14 +177,14 @@ def send_message(
     )
     db.add(ass_message)
 
-    # 13. Update chat timestamp
+    # 14. Update chat timestamp
     chat.updated_at = None  # Force onupdate
     import datetime as _dt
     chat.updated_at = _dt.datetime.now(_dt.timezone.utc)
 
-    # 14. Commit everything
+    # 15. Commit everything
     db.commit()
-    db.refresh(user_message)
+    db.refresh(sent_message)
     db.refresh(ass_message)
     db.refresh(turn)
     db.refresh(raw_request)
@@ -183,7 +192,7 @@ def send_message(
 
     return SendMessageResult(
         turn=turn,
-        user_message=user_message,
+        user_message=sent_message,
         assistant_message=ass_message,
         raw_request=raw_request,
         raw_response=raw_response,
