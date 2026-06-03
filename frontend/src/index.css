@@ -1,6 +1,9 @@
 @import "tailwindcss";
 
-/* Custom scrollbar for dark theme */
+/* Use class-based dark mode (not prefers-color-scheme) so the toggle works */
+@variant dark (&:where(.dark, .dark *));
+
+/* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -8,10 +11,13 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #52525b;
+  background: #a1a1aa;
   border-radius: 3px;
 }
-::-webkit-scrollbar-thumb:hover {
+.dark ::-webkit-scrollbar-thumb {
+  background: #52525b;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
   background: #71717a;
 }
 
@@ -34,11 +40,14 @@ body {
 
 /* Markdown-style message content */
 .message-content pre {
-  background: #1e1e1e;
+  background: #e5e5e5;
   border-radius: 6px;
   padding: 12px;
   overflow-x: auto;
   margin: 8px 0;
+}
+.dark .message-content pre {
+  background: #1e1e1e;
 }
 .message-content code {
   font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;

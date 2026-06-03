@@ -28,9 +28,7 @@ export function ChatHeader({ onMenuClick }: { onMenuClick?: () => void }) {
   };
 
   const handleSaveTitle = () => {
-    if (titleDraft.trim()) {
-      updateTitle(titleDraft.trim());
-    }
+    if (titleDraft.trim()) updateTitle(titleDraft.trim());
     setEditingTitle(false);
   };
 
@@ -40,11 +38,12 @@ export function ChatHeader({ onMenuClick }: { onMenuClick?: () => void }) {
   };
 
   return (
-    <div className="border-b border-gray-800 px-2 sm:px-4 py-2 sm:py-3 flex items-center gap-1 sm:gap-3 shrink-0">
+    <div className="border-b border-gray-200 dark:border-gray-800 px-2 sm:px-4 py-2 sm:py-3 flex items-center gap-1 sm:gap-3 shrink-0">
       {/* Hamburger menu — mobile only */}
       <button
         onClick={onMenuClick}
-        className="md:hidden p-1.5 rounded-lg text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors shrink-0"
+        className="md:hidden p-1.5 rounded-lg text-gray-500 dark:text-gray-400
+                   hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors shrink-0"
       >
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -59,14 +58,15 @@ export function ChatHeader({ onMenuClick }: { onMenuClick?: () => void }) {
           onChange={e => setTitleDraft(e.target.value)}
           onBlur={handleSaveTitle}
           onKeyDown={e => e.key === 'Enter' && handleSaveTitle()}
-          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-100
-                     focus:outline-none focus:border-purple-500 w-32 sm:w-48"
+          className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-2 py-1
+                     text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-purple-500 w-32 sm:w-48"
         />
       ) : (
         <h2
           onClick={() => { setTitleDraft(currentChat.title); setEditingTitle(true); }}
-          className="text-sm font-medium text-gray-300 cursor-pointer hover:text-gray-100
-                     px-1 sm:px-2 py-1 rounded hover:bg-gray-800/50 transition-colors truncate"
+          className="text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer
+                     hover:text-gray-900 dark:hover:text-gray-100 px-1 sm:px-2 py-1 rounded
+                     hover:bg-gray-100 dark:hover:bg-gray-800/50 transition-colors truncate"
           title="Click to edit"
         >
           {currentChat.title}
@@ -81,8 +81,8 @@ export function ChatHeader({ onMenuClick }: { onMenuClick?: () => void }) {
         className={`flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-medium
                    transition-colors duration-150 whitespace-nowrap
                    ${currentChat.system_prompt
-                     ? 'bg-purple-900/30 text-purple-300 border border-purple-700/50 hover:bg-purple-900/50'
-                     : 'bg-gray-800 text-gray-400 border border-gray-700 hover:text-gray-200'
+                     ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-700/50 hover:bg-purple-200 dark:hover:bg-purple-900/50'
+                     : 'bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-300 dark:border-gray-700 hover:text-gray-700 dark:hover:text-gray-200'
                    }`}
         title="Edit system prompt"
       >
@@ -99,8 +99,8 @@ export function ChatHeader({ onMenuClick }: { onMenuClick?: () => void }) {
         className={`flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-medium whitespace-nowrap
                    transition-colors duration-150
                    ${agentFile && agentFileLoaded
-                     ? 'bg-green-900/30 text-green-300 border border-green-700/50 hover:bg-green-900/50'
-                     : 'bg-gray-800 text-gray-400 border border-gray-700 hover:text-gray-200'
+                     ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border border-green-300 dark:border-green-700/50 hover:bg-green-200 dark:hover:bg-green-900/50'
+                     : 'bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-300 dark:border-gray-700 hover:text-gray-700 dark:hover:text-gray-200'
                    }`}
         title="Manage AGENT.md"
       >
@@ -110,7 +110,7 @@ export function ChatHeader({ onMenuClick }: { onMenuClick?: () => void }) {
         </svg>
         <span className="hidden sm:inline">AGENT.md</span>
         {agentFile && agentFileLoaded && (
-          <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
+          <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
         )}
       </button>
 
@@ -118,12 +118,12 @@ export function ChatHeader({ onMenuClick }: { onMenuClick?: () => void }) {
       {editingPrompt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
              onClick={() => setEditingPrompt(false)}>
-          <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-2xl mx-4 shadow-2xl"
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl w-full max-w-2xl mx-4 shadow-2xl"
                onClick={e => e.stopPropagation()}>
-            <div className="p-4 border-b border-gray-800 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-200">System Prompt</h3>
+            <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-200">System Prompt</h3>
               <button onClick={() => setEditingPrompt(false)}
-                      className="text-gray-500 hover:text-gray-300">
+                      className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -135,19 +135,15 @@ export function ChatHeader({ onMenuClick }: { onMenuClick?: () => void }) {
                 value={promptDraft}
                 onChange={e => setPromptDraft(e.target.value)}
                 rows={12}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm text-gray-100
-                           font-mono focus:outline-none focus:border-purple-500 resize-none"
+                className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg p-3
+                           text-sm text-gray-900 dark:text-gray-100 font-mono focus:outline-none focus:border-purple-500
+                           resize-none placeholder-gray-400 dark:placeholder-gray-600"
                 placeholder="You are a helpful assistant..."
               />
               <div className="flex justify-between items-center mt-3">
-                <span className="text-xs text-gray-500">
-                  {promptDraft.length} characters
-                </span>
-                <button
-                  onClick={handleSavePrompt}
-                  className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-sm rounded-lg
-                             font-medium transition-colors"
-                >
+                <span className="text-xs text-gray-400 dark:text-gray-500">{promptDraft.length} characters</span>
+                <button onClick={handleSavePrompt}
+                        className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-sm rounded-lg font-medium transition-colors">
                   Save
                 </button>
               </div>

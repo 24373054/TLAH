@@ -1,3 +1,4 @@
+import { ThemeProvider } from './contexts/ThemeContext'
 import { ChatProvider } from './contexts/ChatContext'
 import { SettingsProvider } from './contexts/SettingsContext'
 import { DebugPanelProvider } from './contexts/DebugPanelContext'
@@ -10,16 +11,18 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   return (
-    <SettingsProvider>
-      <ChatProvider>
-        <DebugPanelProvider>
-          <div className="h-screen bg-gray-950 text-gray-100 flex flex-col overflow-hidden">
-            <AppLayout onOpenSettings={() => setSettingsOpen(true)} />
-            <DebugPanel />
-            {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
-          </div>
-        </DebugPanelProvider>
-      </ChatProvider>
-    </SettingsProvider>
+    <ThemeProvider>
+      <SettingsProvider>
+        <ChatProvider>
+          <DebugPanelProvider>
+            <div className="h-screen bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100 flex flex-col overflow-hidden">
+              <AppLayout onOpenSettings={() => setSettingsOpen(true)} />
+              <DebugPanel />
+              {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+            </div>
+          </DebugPanelProvider>
+        </ChatProvider>
+      </SettingsProvider>
+    </ThemeProvider>
   )
 }

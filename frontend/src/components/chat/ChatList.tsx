@@ -17,7 +17,7 @@ export function ChatList({ onSelect }: Props) {
   if (chats.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center p-4">
-        <p className="text-gray-600 text-sm">No chats yet</p>
+        <p className="text-gray-400 dark:text-gray-500 text-sm">No chats yet</p>
       </div>
     );
   }
