@@ -18,18 +18,34 @@ export function AppLayout({ onOpenSettings, onOpenBackground }: Props) {
   const { config } = useBackground();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Build background style from crop rect + image position in canvas space
-  // The crop rect defines what fills the screen; image is positioned within it.
-  // Areas outside the image show the regular background color (effectively transparent).
+  // Build background style: crop top/bottom → chat top/bottom, centered horizontally.
+  // The image is scaled & positioned so the user's crop rect fills the chat area height,
+  // with horizontal centering. Areas outside the image are transparent.
   const bgStyle: React.CSSProperties = config.image ? (() => {
-    const { cropX, cropY, cropW, cropH, imgX, imgY, imgW } = config;
-    // Compute image position relative to crop rect
-    const relX = ((imgX - cropX) / cropW) * 100;
-    const relY = ((imgY - cropY) / cropH) * 100;
+    const { cropX, cropY, cropW, cropH } = config;
+    const ch = Math.max(cropH, 0.01);
+    const cw = Math.max(cropW, 0.01);
+    const cropCX = cropX + cropW / 2; // crop center X
+
+    // Scale so the crop height fills the element
+    const sizeY = 100 / ch;
+
+    // Position: crop top at element top (0%), crop horizontally centered (50%)
+    // background-position percentage P aligns the P% point of image with P% point of element.
+    // When image size ≠ element size, the formula for element-relative offset is:
+    //   offset = (E - imageSize) * P / 100
+    // We solve for P so that the crop rect aligns with the element.
+    const posX = cw < 0.99
+      ? ((cropCX - 0.5 * cw) / (1 - cw)) * 100
+      : 50;
+    const posY = ch < 0.99
+      ? (cropY / (1 - ch)) * 100
+      : 0;
+
     return {
       backgroundImage: `url(${config.image})`,
-      backgroundSize: `${(imgW / cropW) * 100}% auto`,
-      backgroundPosition: `${relX}% ${relY}%`,
+      backgroundSize: `auto ${sizeY}%`,
+      backgroundPosition: `${posX}% ${posY}%`,
       backgroundRepeat: 'no-repeat',
       filter: `brightness(${config.brightness}%)`,
       opacity: config.opacity / 100,
