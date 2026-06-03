@@ -32,6 +32,7 @@ export function ChatListItem({ id, title, messageCount, isActive, onClick }: Pro
         onClick={onClick}
         onMouseEnter={() => setShowDelete(true)}
         onMouseLeave={() => setShowDelete(false)}
+        onTouchStart={() => setShowDelete(s => !s)}
         className={`group flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer text-sm
           transition-colors duration-100
           ${isActive
@@ -51,18 +52,13 @@ export function ChatListItem({ id, title, messageCount, isActive, onClick }: Pro
           <span className="text-xs text-gray-600 group-hover:text-gray-500">{messageCount}</span>
         )}
 
-        {/* Delete button — visible on hover (desktop) or toggle via click (mobile) */}
+        {/* Delete button — hover reveals on desktop; always visible on mobile */}
         <button
           onClick={handleDeleteClick}
-          onTouchEnd={e => {
-            e.stopPropagation();
-            e.preventDefault();
-            setShowDelete(s => !s);
-          }}
           className={`shrink-0 p-1 rounded hover:bg-red-900/50 text-gray-600 hover:text-red-400
-                     transition-colors duration-100
+                     transition-all duration-100
                      md:opacity-0 md:group-hover:opacity-100
-                     ${showDelete ? 'opacity-100' : 'opacity-0 md:opacity-0'}`}
+                     ${showDelete ? 'opacity-100' : ''}`}
           title="Delete chat"
         >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

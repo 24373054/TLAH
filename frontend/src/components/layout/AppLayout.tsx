@@ -37,7 +37,7 @@ export function AppLayout({ onOpenSettings }: { onOpenSettings: () => void }) {
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col min-w-0">
         {!currentChat ? (
-          <EmptyState onMenuClick={() => setSidebarOpen(true)} hasChats={state.chats.length > 0} />
+          <EmptyState onMenuClick={() => setSidebarOpen(true)} />
         ) : (
           <>
             <ChatHeader onMenuClick={() => setSidebarOpen(true)} />
