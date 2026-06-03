@@ -4,20 +4,22 @@ export interface BgConfig {
   image: string | null;       // base64 data URL
   brightness: number;         // 0–200 (100 = normal)
   opacity: number;            // 0–100
-  cropX: number;              // 0–1, left edge of crop region (fraction of image)
-  cropY: number;              // 0–1, top edge of crop region (fraction of image)
-  cropW: number;              // 0–1, width of crop region (fraction of image)
-  cropH: number;              // 0–1, height of crop region (fraction of image)
+  cropX: number;              // left edge of crop in canvas space (may extend beyond [0,1])
+  cropY: number;              // top edge of crop in canvas space
+  cropW: number;              // width of crop in canvas space
+  cropH: number;              // height of crop in canvas space
+  imgX: number;               // left edge of image in canvas space (0–1)
+  imgY: number;               // top edge of image in canvas space (0–1)
+  imgW: number;               // width of image in canvas space (0–1)
+  imgH: number;               // height of image in canvas space (0–1)
 }
 
 const DEFAULT: BgConfig = {
   image: null,
   brightness: 100,
   opacity: 30,
-  cropX: 0,
-  cropY: 0,
-  cropW: 1,
-  cropH: 1,
+  cropX: 0, cropY: 0, cropW: 1, cropH: 1,
+  imgX: 0, imgY: 0, imgW: 1, imgH: 1,
 };
 
 interface BgContextValue {
@@ -48,8 +50,8 @@ function load(): BgConfig {
           opacity: parsed.opacity ?? 30,
           cropX: Math.max(0, (posX / 100) - cw / 2),
           cropY: Math.max(0, (posY / 100) - ch / 2),
-          cropW: cw,
-          cropH: ch,
+          cropW: cw, cropH: ch,
+          imgX: 0, imgY: 0, imgW: 1, imgH: 1,
         };
       }
       return { ...DEFAULT, ...parsed };

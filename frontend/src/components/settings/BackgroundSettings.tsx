@@ -1,19 +1,37 @@
-import { useState, useEffect, useRef, type DragEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, type DragEvent } from 'react';
 import { useBackground } from '../../contexts/BackgroundContext';
 
 interface Props { onClose: () => void; }
-
 type Corner = 'tl' | 'tr' | 'bl' | 'br';
+
+/* ── Grid canvas dimensions ─────────────────────────────────────── */
+// The canvas is a 4:3 workspace. The image fits centered within it.
+// Crop rect coordinates are fractions of the canvas (0–1).
+
+function fitImage(imgW: number, imgH: number) {
+  // Fit the image centered within the canvas, preserving aspect ratio
+  const scale = Math.min(1 / imgW, 1 / imgH) * 0.85; // 85% of canvas at most
+  const w = imgW * scale;
+  const h = imgH * scale;
+  const x = (1 - w) / 2;
+  const y = (1 - h) / 2;
+  return { x, y, w, h };
+}
 
 export function BackgroundSettings({ onClose }: Props) {
   const { config, updateConfig, resetConfig } = useBackground();
   const [img, setImg] = useState(config.image);
+  const [imgNatural, setImgNatural] = useState<{ w: number; h: number } | null>(null);
   const [brightness, setBrightness] = useState(config.brightness);
   const [opacity, setOpacity] = useState(config.opacity);
-  const [crop, setCrop] = useState({ x: config.cropX, y: config.cropY, w: config.cropW, h: config.cropH });
+  const initialCrop = { x: config.cropX, y: config.cropY, w: config.cropW, h: config.cropH };
+  const [crop, setCrop] = useState(initialCrop);
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Image position within canvas
+  const imgRect = imgNatural ? fitImage(imgNatural.w, imgNatural.h) : { x: 0, y: 0, w: 1, h: 1 };
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -21,9 +39,13 @@ export function BackgroundSettings({ onClose }: Props) {
     return () => { document.body.style.overflow = prev; };
   }, []);
 
-  const apply = (cx: number, cy: number, cw: number, ch: number) => {
-    updateConfig({ image: img, brightness, opacity, cropX: cx, cropY: cy, cropW: cw, cropH: ch });
-  };
+  const apply = useCallback((cx: number, cy: number, cw: number, ch: number) => {
+    updateConfig({
+      image: img, brightness, opacity,
+      cropX: cx, cropY: cy, cropW: cw, cropH: ch,
+      imgX: imgRect.x, imgY: imgRect.y, imgW: imgRect.w, imgH: imgRect.h,
+    });
+  }, [img, brightness, opacity, imgRect, updateConfig]);
 
   // ── File handling ──────────────────────────────────────────────
 
@@ -33,15 +55,17 @@ export function BackgroundSettings({ onClose }: Props) {
     reader.onload = () => {
       const imgEl = new Image();
       imgEl.onload = () => {
-        const maxW = 1920;
-        let w = imgEl.width, h = imgEl.height;
+        const maxW = 1920; let w = imgEl.width, h = imgEl.height;
         if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
+        setImgNatural({ w, h });
         const canvas = document.createElement('canvas');
         canvas.width = w; canvas.height = h;
         canvas.getContext('2d')!.drawImage(imgEl, 0, 0, w, h);
         const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
         setImg(dataUrl);
-        const def = { x: 0, y: 0, w: 1, h: 1 };
+        // Default crop: full image area
+        const r = fitImage(w, h);
+        const def = { x: r.x, y: r.y, w: r.w, h: r.h };
         setCrop(def);
         apply(def.x, def.y, def.w, def.h);
       };
@@ -51,44 +75,38 @@ export function BackgroundSettings({ onClose }: Props) {
   };
 
   const handleDrop = (e: DragEvent) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); };
-
   const handleSave = () => { apply(crop.x, crop.y, crop.w, crop.h); onClose(); };
-  const handleRemove = () => { resetConfig(); setImg(null); setCrop({ x: 0, y: 0, w: 1, h: 1 }); setBrightness(100); setOpacity(30); };
+  const handleRemove = () => { resetConfig(); setImg(null); setImgNatural(null); setCrop({ x: 0, y: 0, w: 1, h: 1 }); setBrightness(100); setOpacity(30); };
 
-  // ── Drag logic — free-form, opposite corner stays fixed ────────
+  // ── Unified drag (mouse + touch) ────────────────────────────────
 
   const dragRef = useRef<{
     corner: Corner | 'center';
-    oppX: number;  // opposite corner (fixed) as fraction
-    oppY: number;
+    oppX: number; oppY: number;
+    startRX: number; startRY: number;
     startCropX: number; startCropY: number; startCropW: number; startCropH: number;
   } | null>(null);
 
-  const detectCorner = (rx: number, ry: number): Corner | 'center' | null => {
-    const margin = 0.04;
-    const corners: Record<Corner, { x: number; y: number }> = {
-      tl: { x: crop.x, y: crop.y },
-      tr: { x: crop.x + crop.w, y: crop.y },
-      bl: { x: crop.x, y: crop.y + crop.h },
-      br: { x: crop.x + crop.w, y: crop.y + crop.h },
+  const getFractional = (clientX: number, clientY: number) => {
+    const el = containerRef.current; if (!el) return { rx: 0, ry: 0 };
+    const r = el.getBoundingClientRect();
+    return { rx: (clientX - r.left) / r.width, ry: (clientY - r.top) / r.height };
+  };
+
+  const detect = (rx: number, ry: number): Corner | 'center' | null => {
+    const m = 0.05;
+    const c: Record<Corner, { x: number; y: number }> = {
+      tl: { x: crop.x, y: crop.y }, tr: { x: crop.x + crop.w, y: crop.y },
+      bl: { x: crop.x, y: crop.y + crop.h }, br: { x: crop.x + crop.w, y: crop.y + crop.h },
     };
-    for (const [key, pos] of Object.entries(corners)) {
-      if (Math.abs(rx - pos.x) < margin && Math.abs(ry - pos.y) < margin) return key as Corner;
-    }
+    for (const [k, p] of Object.entries(c))
+      if (Math.abs(rx - p.x) < m && Math.abs(ry - p.y) < m) return k as Corner;
     if (rx > crop.x && rx < crop.x + crop.w && ry > crop.y && ry < crop.y + crop.h) return 'center';
     return null;
   };
 
-  const onMouseDown = (e: React.MouseEvent) => {
-    const el = containerRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const rx = (e.clientX - rect.left) / rect.width;
-    const ry = (e.clientY - rect.top) / rect.height;
-    const hit = detectCorner(rx, ry);
-    if (!hit) return;
-    e.preventDefault();
-
+  const startDrag = (rx: number, ry: number) => {
+    const hit = detect(rx, ry); if (!hit) return false;
     const opp: Record<string, { x: number; y: number }> = {
       tl: { x: crop.x + crop.w, y: crop.y + crop.h },
       tr: { x: crop.x, y: crop.y + crop.h },
@@ -96,58 +114,60 @@ export function BackgroundSettings({ onClose }: Props) {
       br: { x: crop.x, y: crop.y },
       center: { x: crop.x, y: crop.y },
     };
-
-    dragRef.current = {
-      corner: hit,
-      oppX: opp[hit].x,
-      oppY: opp[hit].y,
-      startCropX: crop.x, startCropY: crop.y, startCropW: crop.w, startCropH: crop.h,
-      _startRX: rx, _startRY: ry,  // store start mouse position for center drag
-    } as any;
+    dragRef.current = { corner: hit, oppX: opp[hit].x, oppY: opp[hit].y,
+      startRX: rx, startRY: ry, startCropX: crop.x, startCropY: crop.y, startCropW: crop.w, startCropH: crop.h };
+    return true;
   };
 
-  const onMouseMove = (e: React.MouseEvent) => {
-    const d = dragRef.current as any;
-    if (!d) return;
-    const el = containerRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const rx = (e.clientX - rect.left) / rect.width;
-    const ry = (e.clientY - rect.top) / rect.height;
-
-    let nx = crop.x, ny = crop.y, nw = crop.w, nh = crop.h;
-
+  const moveDrag = (rx: number, ry: number) => {
+    const d = dragRef.current; if (!d) return;
+    let nx: number, ny: number, nw: number, nh: number;
     if (d.corner === 'center') {
-      const dx = rx - d._startRX;
-      const dy = ry - d._startRY;
-      nx = d.startCropX + dx;
-      ny = d.startCropY + dy;
-      nw = d.startCropW;
-      nh = d.startCropH;
-      // Clamp to keep rect within [0,1]
-      nx = Math.max(0, Math.min(1 - nw, nx));
-      ny = Math.max(0, Math.min(1 - nh, ny));
+      nx = d.startCropX + rx - d.startRX;
+      ny = d.startCropY + ry - d.startRY;
+      nw = d.startCropW; nh = d.startCropH;
+      nx = Math.max(-0.5, Math.min(1.5 - nw, nx));
+      ny = Math.max(-0.5, Math.min(1.5 - nh, ny));
     } else {
-      const oppX = d.oppX, oppY = d.oppY;
-      nx = Math.min(rx, oppX);
-      ny = Math.min(ry, oppY);
-      nw = Math.abs(rx - oppX);
-      nh = Math.abs(ry - oppY);
-      if (nw < 0.02) nw = 0.02;
-      if (nh < 0.02) nh = 0.02;
-      // Recompute nx,ny from opposite
-      if (rx > oppX) nx = oppX; else nx = oppX - nw;
-      if (ry > oppY) ny = oppY; else ny = oppY - nh;
-      nx = Math.max(0, nx); ny = Math.max(0, ny);
-      nw = Math.min(1 - nx, nw); nh = Math.min(1 - ny, nh);
+      nx = Math.min(rx, d.oppX); ny = Math.min(ry, d.oppY);
+      nw = Math.max(0.02, Math.abs(rx - d.oppX));
+      nh = Math.max(0.02, Math.abs(ry - d.oppY));
+      if (rx > d.oppX) nx = d.oppX; else nx = d.oppX - nw;
+      if (ry > d.oppY) ny = d.oppY; else ny = d.oppY - nh;
     }
-
-    d._lastRX = rx; d._lastRY = ry;
     setCrop({ x: nx, y: ny, w: nw, h: nh });
     apply(nx, ny, nw, nh);
   };
 
-  const onMouseUp = () => { dragRef.current = null; };
+  const endDrag = () => { dragRef.current = null; };
+
+  // Mouse
+  const onMouseDown = (e: React.MouseEvent) => {
+    const { rx, ry } = getFractional(e.clientX, e.clientY);
+    if (startDrag(rx, ry)) e.preventDefault();
+  };
+  const onMouseMove = (e: React.MouseEvent) => {
+    const { rx, ry } = getFractional(e.clientX, e.clientY);
+    moveDrag(rx, ry);
+  };
+  const onMouseUp = () => endDrag();
+
+  // Touch
+  const touchId = useRef<number | null>(null);
+  const onTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0];
+    const { rx, ry } = getFractional(t.clientX, t.clientY);
+    if (startDrag(rx, ry)) { touchId.current = t.identifier; e.preventDefault(); }
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    const t = Array.from(e.touches).find(t => t.identifier === touchId.current);
+    if (!t) return;
+    const { rx, ry } = getFractional(t.clientX, t.clientY);
+    moveDrag(rx, ry);
+    e.preventDefault();
+  };
+  const onTouchEnd = () => { touchId.current = null; endDrag(); };
 
   // ── Render ─────────────────────────────────────────────────────
 
@@ -167,29 +187,30 @@ export function BackgroundSettings({ onClose }: Props) {
 
         <div className="p-4 space-y-5">
           <div>
-            <label className={labelCls}>Crop — drag corners (opposite stays fixed) or center to move</label>
+            <label className={labelCls}>Crop — drag corners or center to move</label>
             {img ? (
               <div
                 ref={containerRef}
-                className="relative w-full rounded-lg overflow-hidden bg-gray-800 select-none"
-                onMouseDown={onMouseDown}
-                onMouseMove={onMouseMove}
-                onMouseUp={onMouseUp}
-                onMouseLeave={onMouseUp}
+                className="relative w-full rounded-lg overflow-hidden select-none touch-none"
+                style={{ aspectRatio: '4/3', background: `
+                  repeating-conic-gradient(#e5e5e5 0% 25%, transparent 0% 50%) 50% / 20px 20px
+                ` }}
+                onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
+                onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
               >
-                {/* Image — contain so the full image is always visible */}
+                {/* Image centered in canvas */}
                 <img
-                  src={img}
-                  alt=""
-                  draggable={false}
-                  className="w-full h-auto block pointer-events-none"
-                  style={{ filter: `brightness(${brightness}%)` }}
+                  src={img} alt="" draggable={false}
+                  className="absolute pointer-events-none"
+                  style={{
+                    left: `${imgRect.x * 100}%`, top: `${imgRect.y * 100}%`,
+                    width: `${imgRect.w * 100}%`, height: `${imgRect.h * 100}%`,
+                    objectFit: 'contain', filter: `brightness(${brightness}%)`,
+                  }}
                 />
 
-                {/* Crop overlay — absolute positioned over the image */}
+                {/* Crop rect — solid border, mask outside */}
                 <div className="absolute inset-0">
-                  {/* Dark masks */}
-                  <div className="absolute inset-0 bg-black/50" />
                   <div
                     className="absolute border-2 border-purple-400"
                     style={{
@@ -198,31 +219,21 @@ export function BackgroundSettings({ onClose }: Props) {
                       boxShadow: '0 0 0 9999px rgba(0,0,0,0.45)',
                     }}
                   >
-                    {/* Grid lines */}
                     <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none">
-                      {Array.from({ length: 9 }).map((_, i) => (
-                        <div key={i} className="border-[0.5px] border-white/25" />
-                      ))}
+                      {Array.from({ length: 9 }).map((_, i) => <div key={i} className="border-[0.5px] border-white/25" />)}
                     </div>
-
-                    {/* Corner handles */}
-                    {(['tl', 'tr', 'bl', 'br'] as Corner[]).map(cn => {
-                      const corners: Record<Corner, string> = {
+                    {(['tl','tr','bl','br'] as Corner[]).map(cn => {
+                      const pos: Record<Corner, string> = {
                         tl: 'top-0 left-0 -translate-x-1/2 -translate-y-1/2',
                         tr: 'top-0 right-0 translate-x-1/2 -translate-y-1/2',
                         bl: 'bottom-0 left-0 -translate-x-1/2 translate-y-1/2',
                         br: 'bottom-0 right-0 translate-x-1/2 translate-y-1/2',
                       };
-                      return (
-                        <div key={cn}
-                          className={`absolute ${corners[cn]} w-4 h-4 bg-white border-2 border-purple-500 rounded-sm cursor-nwse-resize shadow z-10`}
-                        />
-                      );
+                      return <div key={cn} className={`absolute ${pos[cn]} w-5 h-5 bg-white border-2 border-purple-500 rounded-sm shadow z-10`} />;
                     })}
                   </div>
                 </div>
 
-                {/* Hint */}
                 <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] text-white/70 bg-black/50 px-2 py-1 rounded pointer-events-none z-20">
                   Drag corners to crop · Drag center to move
                 </div>
@@ -241,15 +252,12 @@ export function BackgroundSettings({ onClose }: Props) {
             {img && <button onClick={handleRemove} className="mt-2 text-xs text-red-600 dark:text-red-400 hover:underline">Remove image</button>}
           </div>
 
-          {/* Brightness */}
           <div>
             <label className={labelCls}>Brightness <span className="text-gray-400 dark:text-gray-600 font-mono">({brightness}%)</span></label>
             <input type="range" min={0} max={200} value={brightness}
                    onChange={e => { const v = Number(e.target.value); setBrightness(v); apply(crop.x, crop.y, crop.w, crop.h); }}
                    className="w-full accent-purple-500" />
           </div>
-
-          {/* Opacity */}
           <div>
             <label className={labelCls}>Opacity <span className="text-gray-400 dark:text-gray-600 font-mono">({opacity}%)</span></label>
             <input type="range" min={0} max={100} value={opacity}
