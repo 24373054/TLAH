@@ -1,9 +1,18 @@
 import { useChat } from '../../contexts/ChatContext';
 import { ChatListItem } from './ChatListItem';
 
-export function ChatList() {
+interface Props {
+  onSelect?: () => void;
+}
+
+export function ChatList({ onSelect }: Props) {
   const { state, selectChat } = useChat();
   const { chats, currentChatId } = state;
+
+  const handleSelect = (id: string) => {
+    selectChat(id);
+    onSelect?.();
+  };
 
   if (chats.length === 0) {
     return (
@@ -22,7 +31,7 @@ export function ChatList() {
           title={chat.title}
           messageCount={chat.message_count}
           isActive={chat.id === currentChatId}
-          onClick={() => selectChat(chat.id)}
+          onClick={() => handleSelect(chat.id)}
         />
       ))}
     </div>

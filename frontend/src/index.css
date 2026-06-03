@@ -20,10 +20,16 @@ body {
   font-family: system-ui, -apple-system, sans-serif;
 }
 
-/* Slide-in animation for DebugPanel */
+/* Slide-in from right (desktop DebugPanel) */
 @keyframes slideIn {
   from { transform: translateX(100%); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
+}
+
+/* Slide-up from bottom (mobile DebugPanel) */
+@keyframes slideUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 
 /* Markdown-style message content */

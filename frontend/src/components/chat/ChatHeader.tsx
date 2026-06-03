@@ -4,7 +4,7 @@ import { AgentFileManager } from '../settings/AgentFileManager';
 import * as api from '../../api/client';
 import type { AgentFileData } from '../../types';
 
-export function ChatHeader() {
+export function ChatHeader({ onMenuClick }: { onMenuClick?: () => void }) {
   const { state, updateSystemPrompt, updateTitle } = useChat();
   const { currentChat } = state;
   const [editingTitle, setEditingTitle] = useState(false);
@@ -40,7 +40,17 @@ export function ChatHeader() {
   };
 
   return (
-    <div className="border-b border-gray-800 px-4 py-3 flex items-center gap-3 shrink-0">
+    <div className="border-b border-gray-800 px-2 sm:px-4 py-2 sm:py-3 flex items-center gap-1 sm:gap-3 shrink-0">
+      {/* Hamburger menu — mobile only */}
+      <button
+        onClick={onMenuClick}
+        className="md:hidden p-1.5 rounded-lg text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors shrink-0"
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+
       {/* Title */}
       {editingTitle ? (
         <input
@@ -50,13 +60,13 @@ export function ChatHeader() {
           onBlur={handleSaveTitle}
           onKeyDown={e => e.key === 'Enter' && handleSaveTitle()}
           className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-100
-                     focus:outline-none focus:border-purple-500 w-48"
+                     focus:outline-none focus:border-purple-500 w-32 sm:w-48"
         />
       ) : (
         <h2
           onClick={() => { setTitleDraft(currentChat.title); setEditingTitle(true); }}
           className="text-sm font-medium text-gray-300 cursor-pointer hover:text-gray-100
-                     px-2 py-1 rounded hover:bg-gray-800/50 transition-colors truncate"
+                     px-1 sm:px-2 py-1 rounded hover:bg-gray-800/50 transition-colors truncate"
           title="Click to edit"
         >
           {currentChat.title}
@@ -68,25 +78,25 @@ export function ChatHeader() {
       {/* System Prompt Button */}
       <button
         onClick={() => { setPromptDraft(currentChat.system_prompt || ''); setEditingPrompt(true); }}
-        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
-                   transition-colors duration-150
+        className={`flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-medium
+                   transition-colors duration-150 whitespace-nowrap
                    ${currentChat.system_prompt
                      ? 'bg-purple-900/30 text-purple-300 border border-purple-700/50 hover:bg-purple-900/50'
                      : 'bg-gray-800 text-gray-400 border border-gray-700 hover:text-gray-200'
                    }`}
         title="Edit system prompt"
       >
-        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
             d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
         </svg>
-        System Prompt
+        <span className="hidden sm:inline">System Prompt</span>
       </button>
 
       {/* AGENT.md Button */}
       <button
         onClick={() => { setShowAgentFile(true); loadAgentFile(); }}
-        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+        className={`flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-medium whitespace-nowrap
                    transition-colors duration-150
                    ${agentFile && agentFileLoaded
                      ? 'bg-green-900/30 text-green-300 border border-green-700/50 hover:bg-green-900/50'
@@ -94,11 +104,11 @@ export function ChatHeader() {
                    }`}
         title="Manage AGENT.md"
       >
-        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
             d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
         </svg>
-        AGENT.md
+        <span className="hidden sm:inline">AGENT.md</span>
         {agentFile && agentFileLoaded && (
           <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
         )}

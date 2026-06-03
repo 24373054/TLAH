@@ -74,7 +74,7 @@ export function SettingsModal({ onClose }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
          onClick={onClose}>
-      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-lg mx-4 shadow-2xl max-h-[90vh] overflow-y-auto"
+      <div className="bg-gray-900 border border-gray-800 md:rounded-xl w-full max-w-lg md:mx-4 shadow-2xl h-full md:max-h-[90vh] overflow-y-auto"
            onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="p-4 border-b border-gray-800 flex items-center justify-between sticky top-0 bg-gray-900 rounded-t-xl">

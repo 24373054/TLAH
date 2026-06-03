@@ -1,19 +1,24 @@
 import { useChat } from '../../contexts/ChatContext';
 import { ChatList } from '../chat/ChatList';
 
-export function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
+interface Props {
+  onOpenSettings: () => void;
+  onSelectChat?: () => void; // close sidebar on mobile after selection
+}
+
+export function Sidebar({ onOpenSettings, onSelectChat }: Props) {
   const { createChat } = useChat();
 
   return (
-    <div className="w-72 min-w-[260px] bg-gray-900 border-r border-gray-800 flex flex-col h-full">
+    <div className="w-72 min-w-[260px] max-w-[85vw] bg-gray-900 border-r border-gray-800 flex flex-col h-full">
       {/* Header */}
-      <div className="p-4 border-b border-gray-800 flex items-center justify-between">
+      <div className="p-4 border-b border-gray-800 flex items-center justify-between shrink-0">
         <h1 className="text-lg font-semibold text-gray-100 tracking-tight">TLAH</h1>
-        <span className="text-xs text-gray-500 font-mono">Talk Like A Human</span>
+        <span className="hidden sm:inline text-xs text-gray-500 font-mono">Talk Like A Human</span>
       </div>
 
       {/* New Chat Button */}
-      <div className="p-3">
+      <div className="p-3 shrink-0">
         <button
           onClick={createChat}
           className="w-full flex items-center gap-2 px-4 py-2.5 rounded-lg
@@ -29,10 +34,10 @@ export function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
       </div>
 
       {/* Chat List */}
-      <ChatList />
+      <ChatList onSelect={onSelectChat} />
 
       {/* Footer — Settings */}
-      <div className="p-3 border-t border-gray-800">
+      <div className="p-3 border-t border-gray-800 shrink-0">
         <button
           onClick={onOpenSettings}
           className="w-full flex items-center gap-2 px-4 py-2 rounded-lg

@@ -61,13 +61,15 @@ function DebugPanelInner({ turnId, onClose }: { turnId: string; onClose: () => v
   const activeData = tab === 'request' ? rawRequest : rawResponse;
 
   return (
-    <div className="fixed inset-0 z-40 flex">
+    <div className="fixed inset-0 z-40 flex flex-col md:flex-row">
       {/* Backdrop */}
-      <div className="flex-1 bg-black/40" onClick={onClose} />
+      <div className="hidden md:block flex-1 bg-black/40" onClick={onClose} />
 
-      {/* Panel */}
-      <div className="w-[560px] max-w-[90vw] bg-gray-950 border-l border-gray-800 flex flex-col shadow-2xl
-                      animate-[slideIn_0.2s_ease-out]">
+      {/* Panel — bottom sheet on mobile, side panel on desktop */}
+      <div className="mt-20 md:mt-0 w-full md:w-[560px] md:max-w-[90vw] bg-gray-950
+                      border-t md:border-l md:border-t-0 border-gray-800 flex flex-col shadow-2xl
+                      rounded-t-xl md:rounded-none flex-1 md:flex-none
+                      animate-[slideUp_0.25s_ease-out] md:animate-[slideIn_0.2s_ease-out]">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 shrink-0">
           <div className="flex items-center gap-3">
@@ -114,7 +116,9 @@ function DebugPanelInner({ turnId, onClose }: { turnId: string; onClose: () => v
 
         {/* Meta info bar */}
         {activeData && (
-          <div className="px-4 py-2 bg-gray-900/50 border-b border-gray-800/50 flex items-center gap-4 text-[10px] text-gray-500 font-mono shrink-0">
+          <div className="px-3 sm:px-4 py-2 bg-gray-900/50 border-b border-gray-800/50
+                          flex items-center gap-2 sm:gap-4 text-[10px] text-gray-500 font-mono shrink-0
+                          overflow-x-auto">
             {tab === 'request' && rawRequest && (
               <>
                 <span>Provider: <span className="text-gray-400">{rawRequest.provider}</span></span>
@@ -169,7 +173,7 @@ function DebugPanelInner({ turnId, onClose }: { turnId: string; onClose: () => v
 
         {/* Footer */}
         <div className="px-4 py-3 border-t border-gray-800 flex items-center justify-between shrink-0">
-          <p className="text-[10px] text-gray-600">
+          <p className="hidden sm:block text-[10px] text-gray-600">
             {tab === 'request'
               ? 'The exact payload sent to the LLM API — including system prompt, full message history, and all parameters.'
               : 'The exact response received from the LLM API — including choices, usage, and all provider-specific fields.'

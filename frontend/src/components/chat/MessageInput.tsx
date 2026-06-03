@@ -46,15 +46,15 @@ export function MessageInput() {
   ];
 
   return (
-    <div className="border-t border-gray-800 px-4 py-3 shrink-0">
-      <div className="max-w-3xl mx-auto flex items-end gap-2">
+    <div className="border-t border-gray-800 px-2 sm:px-4 py-2 sm:py-3 shrink-0">
+      <div className="max-w-3xl mx-auto flex items-end gap-1.5 sm:gap-2">
         {/* Role selector */}
         <div className="flex gap-0.5 shrink-0">
           {roleOptions.map(opt => (
             <button
               key={opt.label}
               onClick={() => setRole(opt.value)}
-              className={`px-2 py-1 rounded text-[10px] font-mono font-medium transition-colors
+              className={`px-1.5 sm:px-2 py-1 rounded text-[9px] sm:text-[10px] font-mono font-medium transition-colors
                 ${activeRole === (opt.value ?? effectiveUserRole)
                   ? 'bg-gray-700 text-gray-200'
                   : 'bg-gray-900 text-gray-600 hover:text-gray-400'
@@ -71,10 +71,10 @@ export function MessageInput() {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={isSystem ? 'System message... (Enter to send)' : 'Type a message... (Enter to send, Shift+Enter for newline)'}
+          placeholder={isSystem ? 'System message...' : 'Message...'}
           rows={1}
           disabled={sending}
-          className={`flex-1 bg-gray-800 border rounded-xl px-4 py-2.5 text-sm
+          className={`flex-1 bg-gray-800 border rounded-xl px-3 sm:px-4 py-2 sm:py-2.5 text-sm
                      placeholder-gray-500 resize-none disabled:opacity-50 transition-colors
                      focus:outline-none focus:ring-1
                      ${isSystem
@@ -102,12 +102,14 @@ export function MessageInput() {
           )}
         </button>
       </div>
-      <p className="text-[11px] text-gray-600 text-center mt-2 flex items-center justify-center gap-2">
+      <p className="text-[10px] sm:text-[11px] text-gray-600 text-center mt-1.5 sm:mt-2 flex items-center justify-center gap-1.5 sm:gap-2">
         <span className={`font-mono ${activeRole === 'system' ? 'text-yellow-500' : 'text-gray-500'}`}>
           [{activeRole}]
         </span>
-        Press <kbd className="px-1 py-0.5 bg-gray-800 rounded text-gray-400 font-mono">Enter</kbd> to send
-        · <kbd className="px-1 py-0.5 bg-gray-800 rounded text-gray-400 font-mono">Shift+Enter</kbd> for newline
+        <span className="hidden sm:inline">
+          <kbd className="px-1 py-0.5 bg-gray-800 rounded text-gray-400 font-mono">Enter</kbd> to send
+          · <kbd className="px-1 py-0.5 bg-gray-800 rounded text-gray-400 font-mono">Shift+Enter</kbd> for newline
+        </span>
       </p>
     </div>
   );
