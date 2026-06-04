@@ -44,12 +44,14 @@ export function AppLayout({ onOpenSettings, onOpenBackground }: Props) {
     const canvasH = canvasW / CANVAS_AR;
     const scale = dims.h / (ch * canvasH);
 
-    const cropLeft = cropX * canvasW * scale;
-    const cropTop = cropY * canvasH * scale;
     const cropWidth = cropW * canvasW * scale;
     const cropHeight = cropH * canvasH * scale;
-
     const centerOff = (dims.w - cropWidth) / 2;
+
+    // Crop window centered horizontally, aligned top.
+    // Image positioned so crop movement and image movement match direction.
+    const imgLeft = centerOff + (cropX - imgX) * canvasW * scale;
+    const imgTop = (cropY - imgY) * canvasH * scale;
 
     return {
       cropStyle: {
@@ -62,8 +64,8 @@ export function AppLayout({ onOpenSettings, onOpenBackground }: Props) {
       },
       imgStyle: {
         position: 'absolute' as const,
-        left: `${imgX * canvasW * scale - cropLeft + centerOff}px`,
-        top: `${imgY * canvasH * scale - cropTop}px`,
+        left: `${imgLeft}px`,
+        top: `${imgTop}px`,
         width: `${imgW * canvasW * scale}px`,
         height: `${imgH * canvasH * scale}px`,
         filter: `brightness(${config.brightness}%)`,
