@@ -8,7 +8,7 @@ export function MessageInput() {
   const { state, sendMessage } = useChat();
   const { globalSettings } = useSettings();
   const { config: bg } = useBackground();
-  const hasBg = !!bg.image;
+  const alpha = bg.chatOpacity / 100;
   const { sending, currentChatId } = state;
   const [input, setInput] = useState('');
   const [role, setRole] = useState<string | null>(null);
@@ -48,7 +48,8 @@ export function MessageInput() {
   ];
 
   return (
-    <div className={`border-t border-gray-200 dark:border-gray-800 px-2 sm:px-4 py-2 sm:py-3 shrink-0 ${hasBg ? 'bg-white/70 dark:bg-gray-950/70 backdrop-blur-sm' : ''}`}>
+    <div className="border-t border-gray-200 dark:border-gray-800 px-2 sm:px-4 py-2 sm:py-3 shrink-0"
+         style={{ opacity: alpha }}>
       <div className="max-w-3xl mx-auto flex items-end gap-1.5 sm:gap-2">
         {/* Role selector */}
         <div className="flex gap-0.5 shrink-0">

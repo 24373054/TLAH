@@ -9,14 +9,14 @@ export function MessageBubble({ message }: { message: Message }) {
   const isAssistant = message.role === 'assistant';
   const isUser = !isSystem && !isAssistant;
   const hasDebug = !!message.turn_id;
-  const hasBg = !!bg.image;
+  const alpha = bg.chatOpacity / 100;
 
   if (isSystem) {
     return (
       <div className="flex justify-center py-2">
-        <span className={`text-xs text-gray-500 dark:text-gray-400 italic px-3 py-1
-                         bg-gray-200 dark:bg-gray-900 rounded-full max-w-[90%] text-center
-                         ${hasBg ? 'bg-opacity-70 dark:bg-opacity-70' : ''}`}>
+        <span className="text-xs text-gray-500 dark:text-gray-400 italic px-3 py-1
+                         bg-gray-200 dark:bg-gray-900 rounded-full max-w-[90%] text-center"
+              style={{ opacity: alpha }}>
           {message.content}
         </span>
       </div>
@@ -25,16 +25,18 @@ export function MessageBubble({ message }: { message: Message }) {
 
   return (
     <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} group`}>
-      <span className="text-[10px] px-1 mb-0.5 font-mono text-gray-400 dark:text-gray-600">
+      <span className="text-[10px] px-1 mb-0.5 font-mono text-gray-400 dark:text-gray-600"
+            style={{ opacity: alpha }}>
         {message.role}
       </span>
 
       <div
         className={`relative max-w-[88%] sm:max-w-[75%] rounded-2xl px-3 sm:px-4 py-2 sm:py-2.5 text-sm leading-relaxed
           ${isUser
-            ? `bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-200 rounded-br-md ${hasBg ? 'bg-opacity-75 dark:bg-opacity-75' : ''}`
-            : `bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-200 rounded-bl-md border border-gray-200 dark:border-gray-800 ${hasBg ? 'bg-opacity-75 dark:bg-opacity-75' : ''}`
+            ? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-200 rounded-br-md'
+            : 'bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-200 rounded-bl-md border border-gray-200 dark:border-gray-800'
           }`}
+        style={{ opacity: alpha }}
       >
         <div className="message-content whitespace-pre-wrap break-words">
           {message.content}

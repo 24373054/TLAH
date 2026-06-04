@@ -8,7 +8,7 @@ import type { AgentFileData } from '../../types';
 export function ChatHeader({ onMenuClick }: { onMenuClick?: () => void }) {
   const { state, updateSystemPrompt, updateTitle } = useChat();
   const { config: bg } = useBackground();
-  const hasBg = !!bg.image;
+  const alpha = bg.chatOpacity / 100;
   const { currentChat } = state;
   const [editingTitle, setEditingTitle] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState(false);
@@ -41,7 +41,8 @@ export function ChatHeader({ onMenuClick }: { onMenuClick?: () => void }) {
   };
 
   return (
-    <div className={`border-b border-gray-200 dark:border-gray-800 px-2 sm:px-4 py-2 sm:py-3 flex items-center gap-1 sm:gap-3 shrink-0 ${hasBg ? 'bg-white/70 dark:bg-gray-950/70 backdrop-blur-sm' : ''}`}>
+    <div className="border-b border-gray-200 dark:border-gray-800 px-2 sm:px-4 py-2 sm:py-3 flex items-center gap-1 sm:gap-3 shrink-0"
+         style={{ opacity: alpha }}>
       {/* Hamburger menu — mobile only */}
       <button
         onClick={onMenuClick}

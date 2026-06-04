@@ -2,11 +2,12 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 
 export interface BgConfig {
   image: string | null;
-  brightness: number;  // 0–200, 100 = normal
-  opacity: number;     // 0–100
+  brightness: number;   // 0–200, 100 = normal
+  opacity: number;      // 0–100, background image opacity
+  chatOpacity: number;  // 0–100, chat bubble transparency
 }
 
-const DEFAULT: BgConfig = { image: null, brightness: 100, opacity: 30 };
+const DEFAULT: BgConfig = { image: null, brightness: 100, opacity: 30, chatOpacity: 100 };
 
 interface BgContextValue {
   config: BgConfig;
@@ -22,7 +23,7 @@ function load(): BgConfig {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const p = JSON.parse(raw);
-      return { image: p.image ?? null, brightness: p.brightness ?? 100, opacity: p.opacity ?? 30 };
+      return { image: p.image ?? null, brightness: p.brightness ?? 100, opacity: p.opacity ?? 30, chatOpacity: p.chatOpacity ?? 100 };
     }
   } catch {}
   return { ...DEFAULT };

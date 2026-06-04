@@ -8,6 +8,7 @@ export function BackgroundSettings({ onClose }: Props) {
   const [img, setImg] = useState(config.image);
   const [brightness, setBrightness] = useState(config.brightness);
   const [opacity, setOpacity] = useState(config.opacity);
+  const [chatOpacity, setChatOpacity] = useState(config.chatOpacity);
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -32,7 +33,7 @@ export function BackgroundSettings({ onClose }: Props) {
         canvas.getContext('2d')!.drawImage(imgEl, 0, 0, w, h);
         const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
         setImg(dataUrl);
-        updateConfig({ image: dataUrl, brightness, opacity });
+        updateConfig({ image: dataUrl, brightness, opacity, chatOpacity });
       };
       imgEl.src = reader.result as string;
     };
@@ -40,8 +41,8 @@ export function BackgroundSettings({ onClose }: Props) {
   };
 
   const handleDrop = (e: DragEvent) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); };
-  const handleSave = () => { updateConfig({ image: img, brightness, opacity }); onClose(); };
-  const handleRemove = () => { resetConfig(); setImg(null); setBrightness(100); setOpacity(30); };
+  const handleSave = () => { updateConfig({ image: img, brightness, opacity, chatOpacity }); onClose(); };
+  const handleRemove = () => { resetConfig(); setImg(null); setBrightness(100); setOpacity(30); setChatOpacity(100); };
 
   const labelCls = "block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5";
 
@@ -91,9 +92,17 @@ export function BackgroundSettings({ onClose }: Props) {
 
           {/* Opacity */}
           <div>
-            <label className={labelCls}>Opacity <span className="text-gray-400 dark:text-gray-600 font-mono">({opacity}%)</span></label>
+            <label className={labelCls}>Background Opacity <span className="text-gray-400 dark:text-gray-600 font-mono">({opacity}%)</span></label>
             <input type="range" min={0} max={100} value={opacity}
                    onChange={e => { const v = Number(e.target.value); setOpacity(v); preview(brightness, v); }}
+                   className="w-full accent-purple-500" />
+          </div>
+
+          {/* Chat bubble transparency */}
+          <div>
+            <label className={labelCls}>Chat Bubble Transparency <span className="text-gray-400 dark:text-gray-600 font-mono">({chatOpacity}%)</span></label>
+            <input type="range" min={10} max={100} value={chatOpacity}
+                   onChange={e => { const v = Number(e.target.value); setChatOpacity(v); updateConfig({ chatOpacity: v }); }}
                    className="w-full accent-purple-500" />
           </div>
         </div>
