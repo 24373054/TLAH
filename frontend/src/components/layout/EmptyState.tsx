@@ -1,14 +1,10 @@
 import { useChat } from '../../contexts/ChatContext';
-import { useBackground } from '../../contexts/BackgroundContext';
-
 interface Props {
   onMenuClick?: () => void;
 }
 
 export function EmptyState({ onMenuClick }: Props) {
   const { createChat } = useChat();
-  const { config: bg } = useBackground();
-  const alpha = bg.chatOpacity / 100;
 
   return (
     <div className="flex-1 flex flex-col">
@@ -28,7 +24,7 @@ export function EmptyState({ onMenuClick }: Props) {
       </div>
 
       <div className="flex-1 flex items-center justify-center px-4">
-        <div className="text-center max-w-md" style={{ opacity: alpha }}>
+        <div className="text-center max-w-md">
           <div className="text-4xl sm:text-6xl mb-4 sm:mb-6">🔍</div>
           <h2 className="text-lg sm:text-2xl font-semibold text-gray-800 dark:text-gray-200 mb-2 sm:mb-3">
             Prompt Debugging Framework
