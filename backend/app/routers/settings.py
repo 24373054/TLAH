@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.config import settings as app_settings
 from app.database import get_db
 from app.models.settings import AgentFile
 from app.schemas.settings import (
@@ -15,6 +17,17 @@ from app.schemas.settings import (
 from app.services import settings_service
 
 router = APIRouter(tags=["settings"])
+
+
+class BetaCodeRequest(BaseModel):
+    code: str
+
+
+@router.post("/verify-beta-code")
+def verify_beta_code(body: BetaCodeRequest):
+    if not app_settings.beta_access_code:
+        return {"valid": True}
+    return {"valid": body.code == app_settings.beta_access_code}
 
 
 # ── Providers ──────────────────────────────────────────────────────
