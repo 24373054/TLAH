@@ -14,6 +14,10 @@ export interface GlobalSettings {
   max_tokens: number;
   system_prompt: string;
   user_role: string;
+  debounce_seconds: number;
+  max_pending_messages: number;
+  max_wait_seconds: number;
+  max_reply_messages: number;
 }
 
 export interface GlobalSettingsUpdate {
@@ -25,6 +29,10 @@ export interface GlobalSettingsUpdate {
   max_tokens?: number;
   system_prompt?: string;
   user_role?: string;
+  debounce_seconds?: number;
+  max_pending_messages?: number;
+  max_wait_seconds?: number;
+  max_reply_messages?: number;
 }
 
 export interface ChatSettings {

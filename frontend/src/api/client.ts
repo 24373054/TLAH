@@ -3,6 +3,7 @@ import type {
   ChatDetail,
   Chat,
   SendMessageResponse,
+  QueueMessageResponse,
   RawRequestData,
   RawResponseData,
   GlobalSettings,
@@ -69,6 +70,15 @@ export function deleteChat(id: string): Promise<void> {
 
 export function sendMessage(chatId: string, content: string, role?: string): Promise<SendMessageResponse> {
   return request(`/chats/${chatId}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ content, ...(role ? { role } : {}) }),
+  });
+}
+
+// ── Async harness: queue message without triggering LLM ──────────────
+
+export function queueMessage(chatId: string, content: string, role?: string): Promise<QueueMessageResponse> {
+  return request(`/chats/${chatId}/messages/queue`, {
     method: 'POST',
     body: JSON.stringify({ content, ...(role ? { role } : {}) }),
   });

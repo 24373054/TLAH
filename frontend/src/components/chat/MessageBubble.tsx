@@ -2,7 +2,13 @@ import { useDebugPanel } from '../../contexts/DebugPanelContext';
 import { useBackground } from '../../contexts/BackgroundContext';
 import type { Message } from '../../types';
 
-export function MessageBubble({ message }: { message: Message }) {
+interface Props {
+  message: Message;
+  isPending?: boolean;
+  hasContinuations?: boolean;
+}
+
+export function MessageBubble({ message, isPending, hasContinuations }: Props) {
   const { toggleDebug } = useDebugPanel();
   const { config: bg } = useBackground();
   const isSystem = message.role === 'system';
@@ -14,35 +20,55 @@ export function MessageBubble({ message }: { message: Message }) {
   if (isSystem) {
     return (
       <div className="flex justify-center py-2">
-        <span className="text-xs text-gray-500 dark:text-gray-400 italic px-3 py-1
-                         bg-gray-200 dark:bg-gray-900 rounded-full max-w-[90%] text-center"
-              style={{ opacity: alpha }}>
+        <span
+          className="text-xs text-gray-500 dark:text-gray-400 italic px-3 py-1
+                     bg-gray-200 dark:bg-gray-900 rounded-full max-w-[90%] text-center"
+          style={{ opacity: alpha }}
+        >
           {message.content}
         </span>
       </div>
     );
   }
 
+  // Pending style: dashed border (turn_id = null, waiting for AI to decide)
+  const bubbleStyle: React.CSSProperties = { opacity: alpha };
+  if (isPending) {
+    bubbleStyle.borderStyle = 'dashed';
+  }
+
   return (
     <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} group`}>
-      <span className="text-[10px] px-1 mb-0.5 font-mono text-gray-400 dark:text-gray-600"
-            style={{ opacity: alpha }}>
+      {/* Role label */}
+      <span
+        className="text-[10px] px-1 mb-0.5 font-mono text-gray-400 dark:text-gray-600"
+        style={{ opacity: alpha }}
+      >
         {message.role}
+        {isPending && (
+          <span className="ml-1 text-yellow-500 dark:text-yellow-400">· queued</span>
+        )}
       </span>
 
+      {/* Bubble */}
       <div
-        className={`relative max-w-[88%] sm:max-w-[75%] rounded-2xl px-3 sm:px-4 py-2 sm:py-2.5 text-sm leading-relaxed
+        className={`relative max-w-[88%] sm:max-w-[75%] rounded-2xl px-3 sm:px-4 py-2 sm:py-2.5 text-sm leading-relaxed min-w-0
           ${isUser
             ? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-200 rounded-br-md'
             : 'bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-200 rounded-bl-md border border-gray-200 dark:border-gray-800'
+          }
+          ${isPending
+            ? '!border-dashed !border-yellow-400/60 dark:!border-yellow-600/40'
+            : ''
           }`}
-        style={{ opacity: alpha }}
+        style={bubbleStyle}
       >
-        <div className="message-content whitespace-pre-wrap break-words">
+        <div className="message-content whitespace-pre-wrap break-words overflow-hidden">
           {message.content}
         </div>
 
-        {hasDebug && isAssistant && (
+        {/* Inspect button — only for messages with debug data */}
+        {hasDebug && (
           <button
             onClick={() => toggleDebug(message.turn_id!)}
             className="mt-1.5 flex items-center gap-1 px-2 py-1 rounded-md
@@ -65,14 +91,22 @@ export function MessageBubble({ message }: { message: Message }) {
           </button>
         )}
 
-        {hasDebug && (
-          <div className={`mt-1 flex items-center gap-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
-            <span className="text-[10px] text-gray-400 dark:text-gray-600 font-mono">
-              Turn #{message.turn_id?.slice(-6)}
-            </span>
-          </div>
+        {/* Continuation badge */}
+        {hasContinuations && isAssistant && (
+          <span className="inline-block ml-1 text-[10px] text-purple-500 dark:text-purple-400 font-mono">
+            (+{'>'})
+          </span>
         )}
       </div>
+
+      {/* Turn number */}
+      {hasDebug && (
+        <div className={`mt-1 flex items-center gap-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
+          <span className="text-[10px] text-gray-400 dark:text-gray-600 font-mono">
+            Turn #{message.turn_id?.slice(-6)}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

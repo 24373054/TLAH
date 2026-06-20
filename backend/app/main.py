@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from app.database import init_db
+from app.database import init_db, migrate_db
 from app.routers import router as api_router
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")
@@ -16,6 +16,7 @@ STATIC_DIR = os.path.abspath(STATIC_DIR)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    migrate_db()
     yield
 
 

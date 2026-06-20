@@ -44,6 +44,7 @@ class ChatResponse(BaseModel):
 
 class ChatDetail(ChatResponse):
     messages: list[MessageResponse] = []
+    turns: list["TurnMeta"] = []
 
     model_config = {"from_attributes": True}
 
@@ -57,3 +58,39 @@ class SendMessageResponse(BaseModel):
     turn_id: str
     user_message: MessageResponse
     assistant_message: MessageResponse
+
+
+class QueueMessageRequest(BaseModel):
+    """Request: save a message without triggering the LLM."""
+    content: str
+    role: str | None = None
+
+
+class QueueMessageResponse(BaseModel):
+    """Response after saving a message (pending, turn_id=null)."""
+    message: MessageResponse
+
+
+class CommitPendingResponse(BaseModel):
+    """Response after committing all pending messages to one Turn."""
+    turn_id: str
+    turn_number: int
+    user_messages: list[MessageResponse]
+    assistant_messages: list[MessageResponse]
+
+
+class ContinueTurnResponse(BaseModel):
+    """Response after continuing a Turn (generating another AI reply)."""
+    turn_id: str
+    turn_number: int
+    parent_turn_id: str
+    assistant_message: MessageResponse
+
+
+class TurnMeta(BaseModel):
+    """Lightweight Turn metadata for frontend message grouping."""
+    id: str
+    turn_number: int
+    parent_turn_id: str | None = None
+    turn_type: str = "reply"  # "reply" | "wait" | "force_reply"
+    child_turn_ids: list[str] = []

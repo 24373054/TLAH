@@ -21,6 +21,22 @@ class SendMessageResult:
     raw_response: RawResponse
 
 
+@dataclass
+class SaveMessageResult:
+    """Result of save_message() — just the saved message, no LLM call."""
+    message: Message
+
+
+@dataclass
+class CommitResult:
+    """Result of commit_pending_messages()."""
+    turn: Turn
+    user_messages: list[Message]
+    assistant_messages: list[Message]
+    raw_request: RawRequest
+    raw_response: RawResponse
+
+
 def _build_messages_for_llm(db: Session, chat_id: str) -> list[dict[str, str]]:
     """Build the message history list.
 
@@ -197,3 +213,75 @@ def send_message(
         raw_request=raw_request,
         raw_response=raw_response,
     )
+
+
+def save_message(
+    db: Session,
+    chat_id: str,
+    content: str,
+    role: str | None = None,
+) -> SaveMessageResult:
+    """
+    Save a message WITHOUT calling the LLM or creating a Turn.
+
+    The message gets turn_id=NULL (pending state). The DecisionLoop will
+    later pick it up, decide when to reply, and create a Turn.
+
+    This is the entry point for the new async harness flow.
+    """
+    from fastapi import HTTPException
+
+    from app.services.chat_service import get_chat_or_404
+
+    chat = get_chat_or_404(db, chat_id)
+    effective = get_effective_settings(db, chat_id)
+
+    msg_role = role if role else effective.user_role
+    seq = get_next_sequence(db, chat_id)
+
+    message = Message(
+        chat_id=chat_id,
+        role=msg_role,
+        content=content,
+        turn_id=None,  # Pending — not yet acknowledged
+        sequence_num=seq,
+    )
+    db.add(message)
+    db.commit()
+    db.refresh(message)
+
+    return SaveMessageResult(message=message)
+
+
+def get_pending_messages(db: Session, chat_id: str) -> list[Message]:
+    """Return all unacknowledged (turn_id=NULL) messages for a chat."""
+    return (
+        db.query(Message)
+        .filter(Message.chat_id == chat_id, Message.turn_id == None)
+        .order_by(Message.sequence_num)
+        .all()
+    )
+
+
+def get_turns_for_chat(db: Session, chat_id: str) -> list[dict]:
+    """Return Turn metadata for a chat (for frontend grouping)."""
+    turns = (
+        db.query(Turn)
+        .filter(Turn.chat_id == chat_id)
+        .order_by(Turn.turn_number)
+        .all()
+    )
+    turn_ids = {t.id for t in turns}
+    result = []
+    for t in turns:
+        child_ids = [
+            c.id for c in turns if c.parent_turn_id == t.id and c.id in turn_ids
+        ]
+        result.append({
+            "id": t.id,
+            "turn_number": t.turn_number,
+            "parent_turn_id": t.parent_turn_id,
+            "turn_type": t.turn_type,
+            "child_turn_ids": child_ids,
+        })
+    return result

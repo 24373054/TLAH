@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useDebugPanel } from '../../contexts/DebugPanelContext';
+import { useChat } from '../../contexts/ChatContext';
 import { JsonViewer } from './JsonViewer';
 import { Spinner } from '../common/Spinner';
 import * as api from '../../api/client';
-import type { RawRequestData, RawResponseData } from '../../types';
+import type { RawRequestData, RawResponseData, TurnMeta } from '../../types';
 
 type Tab = 'request' | 'response';
 
@@ -20,6 +21,20 @@ function DebugPanelInner({ turnId, onClose }: { turnId: string; onClose: () => v
   const [rawResponse, setRawResponse] = useState<RawResponseData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const { state } = useChat();
+  const { openDebug } = useDebugPanel();
+
+  // Find turn metadata from the current chat
+  const turns = state.currentChat?.turns || [];
+  const turnMeta: TurnMeta | undefined = turns.find(t => t.id === turnId);
+  const turnType = turnMeta?.turn_type || 'reply';
+  // const childTurnIds = turnMeta?.child_turn_ids || [];
+
+  // Find parent/child for navigation
+  const allTurnIds = turns.map(t => t.id);
+  const currentIdx = allTurnIds.indexOf(turnId);
+  const prevTurnId = currentIdx > 0 ? allTurnIds[currentIdx - 1] : null;
+  const nextTurnId = currentIdx < allTurnIds.length - 1 ? allTurnIds[currentIdx + 1] : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -70,6 +85,44 @@ function DebugPanelInner({ turnId, onClose }: { turnId: string; onClose: () => v
             <span className="text-[10px] font-mono text-gray-400 dark:text-gray-600 bg-gray-100 dark:bg-gray-900 px-2 py-0.5 rounded">
               Turn {turnId.slice(-8)}
             </span>
+            {/* Turn type badge */}
+            {turnType !== 'reply' && (
+              <span className={`text-[10px] font-mono px-2 py-0.5 rounded ${
+                turnType === 'wait'
+                  ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
+                  : 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400'
+              }`}>
+                {turnType}
+              </span>
+            )}
+            {/* Turn navigation */}
+            {turns.length > 1 && (
+              <div className="flex items-center gap-0.5 ml-2">
+                <button
+                  onClick={() => prevTurnId && openDebug(prevTurnId)}
+                  disabled={!prevTurnId}
+                  className="p-0.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-30"
+                  title="Previous turn"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+                <span className="text-[10px] text-gray-400 dark:text-gray-600 font-mono">
+                  {currentIdx + 1}/{turns.length}
+                </span>
+                <button
+                  onClick={() => nextTurnId && openDebug(nextTurnId)}
+                  disabled={!nextTurnId}
+                  className="p-0.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-30"
+                  title="Next turn"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
+            )}
           </div>
           <button onClick={onClose}
                   className="p-1 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">

@@ -119,6 +119,47 @@ export function SettingsModal({ onClose }: Props) {
               <input type="number" min={1} max={200000} value={form.max_tokens} onChange={e => setForm({ ...form, max_tokens: parseInt(e.target.value) || 4096 })} className={inputCls} />
             </div>
           </div>
+          {/* ── Decision Loop Parameters ───────────────────────────── */}
+          <div className="border-t border-gray-200 dark:border-gray-800 pt-5">
+            <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-4 uppercase tracking-wide">
+              🤖 Async Harness — Decision Loop
+            </h4>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className={labelCls}>Debounce (seconds)</label>
+                <input type="number" min={0.5} max={10} step={0.5}
+                       value={form.debounce_seconds}
+                       onChange={e => setForm({ ...form, debounce_seconds: parseFloat(e.target.value) || 2 })}
+                       className={inputCls} />
+                <p className="text-[10px] text-gray-400 dark:text-gray-600 mt-0.5">Wait after last message before deciding</p>
+              </div>
+              <div>
+                <label className={labelCls}>Max Pending Messages</label>
+                <input type="number" min={1} max={50}
+                       value={form.max_pending_messages}
+                       onChange={e => setForm({ ...form, max_pending_messages: parseInt(e.target.value) || 10 })}
+                       className={inputCls} />
+                <p className="text-[10px] text-gray-400 dark:text-gray-600 mt-0.5">Force reply when this many messages accumulate</p>
+              </div>
+              <div>
+                <label className={labelCls}>Max Wait (seconds)</label>
+                <input type="number" min={5} max={300}
+                       value={form.max_wait_seconds}
+                       onChange={e => setForm({ ...form, max_wait_seconds: parseInt(e.target.value) || 30 })}
+                       className={inputCls} />
+                <p className="text-[10px] text-gray-400 dark:text-gray-600 mt-0.5">Force reply after this long</p>
+              </div>
+              <div>
+                <label className={labelCls}>Max Reply Messages</label>
+                <input type="number" min={1} max={10}
+                       value={form.max_reply_messages}
+                       onChange={e => setForm({ ...form, max_reply_messages: parseInt(e.target.value) || 5 })}
+                       className={inputCls} />
+                <p className="text-[10px] text-gray-400 dark:text-gray-600 mt-0.5">Cap on AI reply message count</p>
+              </div>
+            </div>
+          </div>
+
           {/* System Prompt */}
           <div>
             <label className={labelCls}>Default System Prompt</label>

@@ -18,4 +18,4 @@ dist/
 Thumbs.db
 .pids/
 
-.env
+.env*.log

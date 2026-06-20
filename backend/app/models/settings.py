@@ -28,6 +28,11 @@ class GlobalSettings(Base):
     max_tokens: Mapped[int] = mapped_column(Integer, default=4096)
     system_prompt: Mapped[str] = mapped_column(Text, default="You are a helpful assistant.")
     user_role: Mapped[str] = mapped_column(String(50), default="user")
+    # Decision loop parameters
+    debounce_seconds: Mapped[float] = mapped_column(Float, default=2.0)
+    max_pending_messages: Mapped[int] = mapped_column(Integer, default=10)
+    max_wait_seconds: Mapped[int] = mapped_column(Integer, default=30)
+    max_reply_messages: Mapped[int] = mapped_column(Integer, default=5)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 

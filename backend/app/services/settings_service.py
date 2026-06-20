@@ -35,6 +35,10 @@ def get_global_settings_masked(db: Session) -> dict:
         "max_tokens": gs.max_tokens,
         "system_prompt": gs.system_prompt,
         "user_role": gs.user_role,
+        "debounce_seconds": gs.debounce_seconds,
+        "max_pending_messages": gs.max_pending_messages,
+        "max_wait_seconds": gs.max_wait_seconds,
+        "max_reply_messages": gs.max_reply_messages,
     }
 
 

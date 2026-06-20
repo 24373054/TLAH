@@ -14,6 +14,8 @@ export function ChatHeader({ onMenuClick }: { onMenuClick?: () => void }) {
   const [showAgentFile, setShowAgentFile] = useState(false);
   const [agentFile, setAgentFile] = useState<AgentFileData | null>(null);
   const [agentFileLoaded, setAgentFileLoaded] = useState(false);
+  const [showHarness, setShowHarness] = useState(false);
+  const [harnessPrompt, setHarnessPrompt] = useState('');
 
   if (!currentChat) return null;
 
@@ -25,6 +27,16 @@ export function ChatHeader({ onMenuClick }: { onMenuClick?: () => void }) {
       setAgentFile(null);
     }
     setAgentFileLoaded(true);
+  };
+
+  const loadHarnessPrompt = async () => {
+    try {
+      const res = await fetch('/api/harness-prompt');
+      const data = await res.json();
+      setHarnessPrompt(data.prompt || '');
+    } catch {
+      setHarnessPrompt('Failed to load harness prompt.');
+    }
   };
 
   const handleSaveTitle = () => {
@@ -114,6 +126,23 @@ export function ChatHeader({ onMenuClick }: { onMenuClick?: () => void }) {
         )}
       </button>
 
+      {/* Harness Prompt Button */}
+      <button
+        onClick={() => { setShowHarness(true); loadHarnessPrompt(); }}
+        className="flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-medium whitespace-nowrap
+                   transition-colors duration-150
+                   bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300
+                   border border-amber-300 dark:border-amber-700/50
+                   hover:bg-amber-100 dark:hover:bg-amber-900/40"
+        title="View harness decision prompt"
+      >
+        <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+            d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+        </svg>
+        <span className="hidden sm:inline">Harness</span>
+      </button>
+
       {/* System Prompt Modal */}
       {editingPrompt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
@@ -159,6 +188,38 @@ export function ChatHeader({ onMenuClick }: { onMenuClick?: () => void }) {
           onClose={() => { setShowAgentFile(false); setAgentFileLoaded(false); }}
           onUpdate={(af) => setAgentFile(af)}
         />
+      )}
+
+      {/* Harness Prompt Modal */}
+      {showHarness && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+             onClick={() => setShowHarness(false)}>
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl w-full max-w-2xl mx-4 shadow-2xl max-h-[85vh] flex flex-col"
+               onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between shrink-0">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-200">
+                🤖 Harness Decision Prompt
+              </h3>
+              <button onClick={() => setShowHarness(false)}
+                      className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto">
+              <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">
+                This prompt is injected into every LLM call as part of the system instructions.
+                It gives the AI autonomy over <strong>when</strong> to reply and <strong>how many messages</strong> to send.
+              </p>
+              <pre className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4
+                              text-xs text-gray-900 dark:text-gray-100 font-mono
+                              whitespace-pre-wrap break-words overflow-x-auto max-h-[55vh]">
+                {harnessPrompt || 'Loading...'}
+              </pre>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

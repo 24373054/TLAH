@@ -45,6 +45,7 @@ body {
   padding: 12px;
   overflow-x: auto;
   margin: 8px 0;
+  max-width: 100%;
 }
 .dark .message-content pre {
   background: #1e1e1e;

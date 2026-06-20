@@ -54,6 +54,12 @@ class Turn(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     chat_id: Mapped[str] = mapped_column(String(36), ForeignKey("chats.id"), index=True)
     turn_number: Mapped[int] = mapped_column(Integer, default=1)
+    parent_turn_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("turns.id"), nullable=True, index=True,
+    )
+    turn_type: Mapped[str] = mapped_column(
+        String(20), default="reply",
+    )  # "reply" | "wait" | "force_reply"
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     chat: Mapped["Chat"] = relationship("Chat", back_populates="turns")
@@ -65,4 +71,11 @@ class Turn(Base):
     )
     raw_response: Mapped["RawResponse | None"] = relationship(
         "RawResponse", back_populates="turn", uselist=False, cascade="all, delete-orphan",
+    )
+    parent_turn: Mapped["Turn | None"] = relationship(
+        "Turn", remote_side="Turn.id", back_populates="child_turns",
+        foreign_keys=[parent_turn_id],
+    )
+    child_turns: Mapped[list["Turn"]] = relationship(
+        "Turn", back_populates="parent_turn", cascade="all, delete-orphan",
     )

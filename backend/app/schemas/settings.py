@@ -41,6 +41,10 @@ class GlobalSettingsResponse(BaseModel):
     max_tokens: int
     system_prompt: str
     user_role: str
+    debounce_seconds: float
+    max_pending_messages: int
+    max_wait_seconds: int
+    max_reply_messages: int
 
     model_config = {"from_attributes": True}
 
@@ -54,6 +58,10 @@ class GlobalSettingsUpdate(BaseModel):
     max_tokens: int | None = None
     system_prompt: str | None = None
     user_role: str | None = None
+    debounce_seconds: float | None = None
+    max_pending_messages: int | None = None
+    max_wait_seconds: int | None = None
+    max_reply_messages: int | None = None
 
 
 class ChatSettingsResponse(BaseModel):

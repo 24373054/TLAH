@@ -122,3 +122,14 @@ def delete_agent_file(chat_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="No agent file for this chat")
     db.delete(af)
     db.commit()
+
+
+@router.get("/harness-prompt")
+def get_harness_prompt():
+    """Return the harness decision prompt injected into every LLM call.
+
+    This prompt instructs the LLM to autonomously decide when to reply
+    and how many messages to send — the core of the async harness.
+    """
+    from app.services.decision_loop import DECISION_INSTRUCTION
+    return {"prompt": DECISION_INSTRUCTION}
