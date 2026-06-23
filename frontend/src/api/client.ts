@@ -55,7 +55,7 @@ export function getChat(id: string): Promise<ChatDetail> {
   return request(`/chats/${id}`);
 }
 
-export function updateChat(id: string, data: { title?: string; system_prompt?: string }): Promise<Chat> {
+export function updateChat(id: string, data: { title?: string; system_prompt?: string; agent_enabled?: boolean }): Promise<Chat> {
   return request(`/chats/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(data),

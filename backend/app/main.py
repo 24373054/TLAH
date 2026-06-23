@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from app.database import init_db, migrate_db
+from app.models import sandbox as _sandbox  # noqa: F401  ensure table creation
 from app.routers import router as api_router
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")
@@ -18,6 +19,17 @@ async def lifespan(app: FastAPI):
     init_db()
     migrate_db()
     yield
+    # Cleanup sandboxes on shutdown
+    import asyncio
+    from app.services.sandbox import SandboxManager
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(SandboxManager.stop_all())
+        else:
+            loop.run_until_complete(SandboxManager.stop_all())
+    except Exception:
+        pass
 
 
 app = FastAPI(

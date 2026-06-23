@@ -125,11 +125,17 @@ def delete_agent_file(chat_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/harness-prompt")
-def get_harness_prompt():
+def get_harness_prompt(agent_mode: bool = False):
     """Return the harness decision prompt injected into every LLM call.
 
     This prompt instructs the LLM to autonomously decide when to reply
     and how many messages to send — the core of the async harness.
+
+    When agent_mode=true, also returns the sandbox agent prompt.
     """
-    from app.services.decision_loop import DECISION_INSTRUCTION
-    return {"prompt": DECISION_INSTRUCTION}
+    from app.services.decision_loop import DECISION_INSTRUCTION, AGENT_SYSTEM_PROMPT
+
+    prompt = DECISION_INSTRUCTION
+    if agent_mode:
+        prompt += "\n\n" + AGENT_SYSTEM_PROMPT
+    return {"prompt": prompt}

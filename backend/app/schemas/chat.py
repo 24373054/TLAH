@@ -5,11 +5,13 @@ from pydantic import BaseModel, Field
 
 class ChatCreate(BaseModel):
     title: str = "New Chat"
+    agent_enabled: bool = True
 
 
 class ChatUpdate(BaseModel):
     title: str | None = None
     system_prompt: str | None = None
+    agent_enabled: bool | None = None
 
 
 class MessageResponse(BaseModel):
@@ -18,6 +20,8 @@ class MessageResponse(BaseModel):
     content: str
     turn_id: str | None = None
     sequence_num: int
+    message_type: str = "text"
+    metadata_json: dict | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -36,6 +40,7 @@ class ChatResponse(BaseModel):
     id: str
     title: str
     system_prompt: str
+    agent_enabled: bool = True
     created_at: datetime
     updated_at: datetime
 

@@ -9,6 +9,7 @@ export interface Chat {
   id: string;
   title: string;
   system_prompt: string;
+  agent_enabled: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -28,10 +29,12 @@ export interface ChatDetail extends Chat {
 
 export interface Message {
   id: string;
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'sandbox';
   content: string;
   turn_id: string | null;
   sequence_num: number;
+  message_type: string;  // "text" | "sandbox_call" | "sandbox_result"
+  metadata_json: Record<string, unknown> | null;
   created_at: string;
 }
 

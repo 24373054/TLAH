@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -21,6 +21,8 @@ class Chat(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     title: Mapped[str] = mapped_column(String(255), default="New Chat")
     system_prompt: Mapped[str] = mapped_column(Text, default="")
+    agent_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    agent_max_iterations: Mapped[int] = mapped_column(Integer, default=10)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
@@ -38,10 +40,16 @@ class Message(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     chat_id: Mapped[str] = mapped_column(String(36), ForeignKey("chats.id"), index=True)
-    role: Mapped[str] = mapped_column(String(20))  # user, assistant, system
+    role: Mapped[str] = mapped_column(String(20))  # user, assistant, system, sandbox
     content: Mapped[str] = mapped_column(Text)
     turn_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("turns.id"), nullable=True)
     sequence_num: Mapped[int] = mapped_column(Integer, default=0)
+    message_type: Mapped[str] = mapped_column(
+        String(20), default="text"
+    )  # "text" | "sandbox_call" | "sandbox_result"
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # sandbox_call: {"command":"...", "working_dir":"...", "description":"..."}
+    # sandbox_result: {"exit_code":0, "stdout":"...", "stderr":"...", "duration_ms":120}
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     chat: Mapped["Chat"] = relationship("Chat", back_populates="messages")

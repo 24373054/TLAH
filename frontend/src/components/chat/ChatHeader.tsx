@@ -5,7 +5,7 @@ import * as api from '../../api/client';
 import type { AgentFileData } from '../../types';
 
 export function ChatHeader({ onMenuClick }: { onMenuClick?: () => void }) {
-  const { state, updateSystemPrompt, updateTitle } = useChat();
+  const { state, updateSystemPrompt, updateTitle, selectChat } = useChat();
   const { currentChat } = state;
   const [editingTitle, setEditingTitle] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState(false);
@@ -29,9 +29,10 @@ export function ChatHeader({ onMenuClick }: { onMenuClick?: () => void }) {
     setAgentFileLoaded(true);
   };
 
-  const loadHarnessPrompt = async () => {
+  const loadHarnessPrompt = async (agent?: boolean) => {
     try {
-      const res = await fetch('/api/harness-prompt');
+      const mode = agent ?? (currentChat?.agent_enabled !== false);
+      const res = await fetch(`/api/harness-prompt?agent_mode=${mode}`);
       const data = await res.json();
       setHarnessPrompt(data.prompt || '');
     } catch {
@@ -190,15 +191,16 @@ export function ChatHeader({ onMenuClick }: { onMenuClick?: () => void }) {
         />
       )}
 
-      {/* Harness Prompt Modal */}
+      {/* Harness Modal (merged: Agent toggle + decision prompt) */}
       {showHarness && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
              onClick={() => setShowHarness(false)}>
           <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl w-full max-w-2xl mx-4 shadow-2xl max-h-[85vh] flex flex-col"
                onClick={e => e.stopPropagation()}>
+            {/* Header */}
             <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between shrink-0">
               <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-200">
-                🤖 Harness Decision Prompt
+                🤖 Harness
               </h3>
               <button onClick={() => setShowHarness(false)}
                       className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300">
@@ -207,14 +209,50 @@ export function ChatHeader({ onMenuClick }: { onMenuClick?: () => void }) {
                 </svg>
               </button>
             </div>
+
+            {/* Agent toggle section */}
+            <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between shrink-0">
+              <div>
+                <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                  Agent Mode
+                </span>
+                <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
+                  Sandbox shell access + autonomous multi-step execution
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  if (!currentChat) return;
+                  const newVal = !currentChat.agent_enabled;
+                  try {
+                    await api.updateChat(currentChat.id, { agent_enabled: newVal });
+                    // Reload chat from context then refresh the prompt
+                    await selectChat(currentChat.id);
+                    await loadHarnessPrompt(newVal);
+                  } catch { /* ignore */ }
+                }}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0
+                  ${currentChat?.agent_enabled !== false
+                    ? 'bg-green-500'
+                    : 'bg-gray-300 dark:bg-gray-600'
+                  }`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform
+                  ${currentChat?.agent_enabled !== false ? 'translate-x-6' : 'translate-x-1'}`} />
+              </button>
+            </div>
+
+            {/* Prompt section */}
             <div className="p-4 overflow-y-auto">
               <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">
                 This prompt is injected into every LLM call as part of the system instructions.
-                It gives the AI autonomy over <strong>when</strong> to reply and <strong>how many messages</strong> to send.
+                {currentChat?.agent_enabled !== false
+                  ? ' In agent mode, the sandbox tool definitions are also appended.'
+                  : ''}
               </p>
               <pre className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4
                               text-xs text-gray-900 dark:text-gray-100 font-mono
-                              whitespace-pre-wrap break-words overflow-x-auto max-h-[55vh]">
+                              whitespace-pre-wrap break-words overflow-x-auto max-h-[50vh]">
                 {harnessPrompt || 'Loading...'}
               </pre>
             </div>

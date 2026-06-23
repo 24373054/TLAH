@@ -52,6 +52,51 @@ def _get_config(db) -> dict:
         "max_reply": getattr(gs, "max_reply_messages", None) or _DEFAULT_MAX_REPLY,
     }
 
+# ── Agent prompt ───────────────────────────────────────────────────────
+
+AGENT_SYSTEM_PROMPT = """[SANDBOX ENVIRONMENT]
+You have access to a Linux sandbox (Ubuntu 24.04). You can execute shell
+commands to complete tasks. The workspace is /workspace.
+
+Pre-installed tools:
+- python3 + pip3 (pip install works normally)
+- node (v22) + npm
+- git, curl, wget
+- gcc, g++, make, cmake
+- jq, vim, zip, unzip, file
+
+Available action (in addition to "reply" and "wait"):
+{"action":"tool_call","tool":"shell","command":"<shell command>","description":"<what this does>"}
+
+Rules:
+- Work iteratively: run a command, analyze the output, decide next step
+- When the task is complete, use "reply" to respond to the user
+- You may chain multiple tool calls before replying (max 10 iterations)
+- Every command runs in isolation — state persists in /workspace
+- Commands timeout after 30 seconds
+- Network access is enabled — you can pip install, npm install, git clone, etc.
+
+[CRITICAL — OUTPUT FORMAT]
+You MUST respond with ONLY a raw JSON object. Never use XML tags like
+<function_calls> or <invoke>. The ONLY valid formats are JSON:
+
+{"action":"reply","messages":[{"content":"msg1"},{"content":"msg2"}]}
+{"action":"wait"}
+{"action":"tool_call","tool":"shell","command":"the command","description":"what it does"}
+
+CRITICAL: In shell commands, use SINGLE QUOTES (') for quoting, never
+double quotes ("). Example: use  grep -E 'pattern'  not  grep -E \"pattern\".
+Double quotes inside the JSON command value will BREAK the JSON parser.
+
+Do NOT output any text before or after the JSON — not even a single word
+of reasoning or explanation. Your ENTIRE response must be parseable as JSON.
+Do NOT use XML. Do NOT wrap in markdown code fences.
+
+When replying after generating files, include an optional "files" array
+to share files with the user:
+{"action":"reply","messages":[...],"files":["/workspace/image.png"]}
+Images (png/jpg/gif/svg/webp) appear as previews; others as downloads."""
+
 # ── Decision prompt ───────────────────────────────────────────────────
 
 DECISION_INSTRUCTION = """[ROLE]
@@ -86,7 +131,8 @@ For waiting:
 [IMPORTANT]
 - Respond ONLY with the JSON object, nothing else
 - When replying, each message's "content" is a plain text string
-- Do NOT wrap the JSON in markdown code blocks"""
+- Do NOT wrap the JSON in markdown code blocks
+- Do NOT use XML tags like <function_calls>. Use ONLY JSON."""
 
 # ── Decision Loop ─────────────────────────────────────────────────────
 
@@ -167,6 +213,11 @@ class DecisionLoop:
             if not pending:
                 return
 
+            # Check if agent mode is enabled for this chat
+            chat = db.query(Chat).filter(Chat.id == self.chat_id).first()
+            is_agent = chat.agent_enabled if chat else False
+            max_iterations = chat.agent_max_iterations if chat else 10
+
             # Check safety limits
             oldest_age = (
                 datetime.now(timezone.utc) - pending[0].created_at.replace(tzinfo=timezone.utc)
@@ -176,7 +227,9 @@ class DecisionLoop:
                 or oldest_age >= cfg["max_wait"]
             )
 
-            if force:
+            if is_agent:
+                self._process_agent(db, pending, cfg, max_iterations, force)
+            elif force:
                 self._force_reply(db, pending, oldest_age, cfg)
             else:
                 self._llm_decide(db, pending, cfg)
@@ -220,15 +273,16 @@ class DecisionLoop:
         decision_messages: list[dict[str, str]] = []
 
         for m in all_msgs:
+            role = m.role if m.role in ("user", "assistant", "system") else "user"
             if m.id in pending_ids:
                 # Mark unread messages so LLM knows they're new
                 decision_messages.append({
-                    "role": m.role,
+                    "role": role,
                     "content": f"[NEW] {m.content}",
                 })
             else:
                 decision_messages.append({
-                    "role": m.role,
+                    "role": role,
                     "content": m.content,
                 })
 
@@ -238,7 +292,7 @@ class DecisionLoop:
             "content": (
                 'The messages marked [NEW] above are new from the user. '
                 'Decide: REPLY now or WAIT for more?\n'
-                'Respond with ONLY the JSON (no markdown fences):\n'
+                'Respond with ONLY the JSON (no text, no reasoning, no markdown):\n'
                 '{"action":"reply","messages":[{"content":"msg1"},{"content":"msg2"}]}\n'
                 'or: {"action":"wait"}'
             ),
@@ -286,7 +340,10 @@ class DecisionLoop:
         if decision.get("action") == "reply":
             turn.turn_type = "reply"
             max_reply = cfg.get("max_reply", 5) if cfg else 5
-            self._save_reply(db, pending, turn, decision.get("messages", []), max_reply)
+            self._save_reply(
+                db, pending, turn, decision.get("messages", []), max_reply,
+                files=decision.get("files"),
+            )
         else:
             turn.turn_type = "wait"
             # Messages stay pending (turn_id remains NULL)
@@ -322,15 +379,21 @@ class DecisionLoop:
 
         messages_for_llm: list[dict[str, str]] = []
         for m in all_msgs:
+            role = m.role if m.role in ("user", "assistant", "system") else "user"
             if m.id in pending_ids:
                 messages_for_llm.append({
-                    "role": m.role,
+                    "role": role,
                     "content": f"[NEW] {m.content}",
                 })
             else:
+                suffix = ""
+                if m.message_type == "sandbox_call":
+                    suffix = "[SANDBOX COMMAND] "
+                elif m.message_type == "sandbox_result":
+                    suffix = "[SANDBOX OUTPUT] "
                 messages_for_llm.append({
-                    "role": m.role,
-                    "content": m.content,
+                    "role": role,
+                    "content": suffix + m.content,
                 })
 
         # Create Turn
@@ -437,6 +500,7 @@ class DecisionLoop:
         turn: Turn,
         reply_messages: list[dict],
         max_reply: int = 5,
+        files: list[str] | None = None,
     ):
         """Save assistant reply messages and link pending user messages to the turn."""
         # Link pending messages to this turn
@@ -445,6 +509,7 @@ class DecisionLoop:
 
         # Save assistant messages
         seq = get_next_sequence(db, self.chat_id)
+        last_msg = None
         for i, rmsg in enumerate(reply_messages[:max_reply]):
             content = rmsg.get("content", "") if isinstance(rmsg, dict) else str(rmsg)
             if not content.strip():
@@ -457,6 +522,15 @@ class DecisionLoop:
                 sequence_num=seq + i,
             )
             db.add(am)
+            last_msg = am
+
+        # Attach files to the last assistant message
+        if files and last_msg:
+            file_urls = []
+            for f in files:
+                fname = f.replace("/workspace/", "").lstrip("/")
+                file_urls.append(f"/api/chats/{self.chat_id}/files/{fname}")
+            last_msg.metadata_json = json.dumps({"files": files, "file_urls": file_urls})
 
         logger.info(
             "DecisionLoop reply for chat %s — %d user msg(s) → %d assistant msg(s)",
@@ -465,13 +539,339 @@ class DecisionLoop:
             min(len(reply_messages), max_reply),
         )
 
+    # ── Agent loop ────────────────────────────────────────────────────
+
+    def _process_agent(
+        self,
+        db,
+        pending: list[Message],
+        cfg: dict,
+        max_iterations: int,
+        force: bool,
+    ):
+        """Agent mode: iterative loop with tool calling.
+
+        The LLM can request tool calls (shell commands) in addition to
+        wait/reply. Each tool call is executed in the sandbox and the
+        result is fed back to the LLM for the next decision.
+
+        Each LLM call creates a Turn (parent_turn chain) for full debug data.
+        """
+        import asyncio
+
+        from app.services.sandbox import SandboxManager, SandboxResult
+
+        chat = db.query(Chat).filter(Chat.id == self.chat_id).first()
+        if not chat:
+            return
+
+        effective = get_effective_settings(db, self.chat_id)
+
+        # Build the base system prompt with agent instructions
+        base_system = self._build_decision_system_prompt(db, chat, effective)
+        system_prompt = base_system + "\n\n" + AGENT_SYSTEM_PROMPT
+
+        if force:
+            system_prompt += "\n\n[NOTE] Safety limit reached — please reply now."
+
+        # Get all existing messages
+        all_msgs = (
+            db.query(Message)
+            .filter(Message.chat_id == self.chat_id)
+            .order_by(Message.sequence_num)
+            .all()
+        )
+        pending_ids = {m.id for m in pending}
+
+        # Build initial messages array — sandbox messages mapped to "user" for API compat
+        messages_for_llm: list[dict[str, str]] = []
+        for m in all_msgs:
+            role = m.role if m.role in ("user", "assistant", "system") else "user"
+            if m.id in pending_ids:
+                messages_for_llm.append({
+                    "role": role,
+                    "content": f"[NEW] {m.content}",
+                })
+            else:
+                # Sandbox messages get a prefix so the LLM can distinguish them
+                if m.message_type == "sandbox_call":
+                    messages_for_llm.append({
+                        "role": role,
+                        "content": f"[SANDBOX COMMAND] {m.content}",
+                    })
+                elif m.message_type == "sandbox_result":
+                    messages_for_llm.append({
+                        "role": role,
+                        "content": f"[SANDBOX OUTPUT] {m.content}",
+                    })
+                else:
+                    messages_for_llm.append({
+                        "role": role,
+                        "content": m.content,
+                    })
+
+        # Add decision instruction
+        messages_for_llm.append({
+            "role": "user",
+            "content": (
+                'The messages marked [NEW] above are new. '
+                'You are in agent mode with sandbox access.\n'
+                'Decide: REPLY, WAIT, or TOOL_CALL?\n'
+                'Respond with ONLY the JSON (no text, no reasoning, no markdown):\n'
+                '{"action":"reply","messages":[{"content":"msg"}]}\n'
+                'or: {"action":"wait"}\n'
+                'or: {"action":"tool_call","tool":"shell",'
+                '"command":"<shell command>","description":"<what this does>"}'
+            ),
+        })
+
+        parent_turn_id: str | None = None
+        first_turn = True
+
+        for iteration in range(1, max_iterations + 1):
+            # Create Turn
+            turn_count = db.query(Turn).filter(Turn.chat_id == self.chat_id).count()
+            turn = Turn(
+                chat_id=self.chat_id,
+                turn_number=turn_count + 1,
+                turn_type="reply",
+                parent_turn_id=parent_turn_id,
+            )
+            db.add(turn)
+            db.flush()
+
+            if first_turn:
+                # Link pending messages to the first turn
+                for msg in pending:
+                    msg.turn_id = turn.id
+                first_turn = False
+
+            # Call LLM
+            provider = create_provider(
+                provider_name=effective.provider,
+                api_key=effective.api_key,
+                base_url=effective.base_url,
+                model=effective.model,
+            )
+
+            loop = asyncio.new_event_loop()
+            try:
+                llm_result = loop.run_until_complete(
+                    provider.chat(
+                        messages=messages_for_llm,
+                        system_prompt=system_prompt,
+                        temperature=effective.temperature,
+                        max_tokens=effective.max_tokens,
+                    )
+                )
+            finally:
+                loop.close()
+
+            # Store debug data
+            self._save_debug_data(db, turn, provider, llm_result)
+
+            # Parse decision. If JSON parsing failed (returned text as-is in "messages"),
+            # give the LLM one chance to correct itself.
+            decision = self._parse_decision(llm_result.assistant_text)
+            was_fallback = (
+                decision.get("action") == "reply"
+                and len(decision.get("messages", [])) == 1
+                and llm_result.assistant_text.strip() == decision["messages"][0]["content"]
+                and not llm_result.assistant_text.strip().startswith("{")
+            )
+            if was_fallback and iteration < max_iterations:
+                logger.warning(
+                    "LLM response was not JSON, asking for correction (iteration %d)", iteration,
+                )
+                messages_for_llm.append({
+                    "role": "user",
+                    "content": (
+                        "[SYSTEM] Your last response was not valid JSON. "
+                        "You MUST respond with ONLY a JSON object. No reasoning, "
+                        "no markdown, no text — ONLY the JSON. "
+                        'Example: {"action":"tool_call","tool":"shell",'
+                        '"command":"ls","description":"list files"}'
+                    ),
+                })
+                parent_turn_id = turn.id
+                continue
+
+            action = decision.get("action", "reply")
+
+            if action == "wait":
+                turn.turn_type = "wait"
+                # Undo pending link if we're waiting
+                if first_turn is False and parent_turn_id is None:
+                    for msg in pending:
+                        msg.turn_id = None
+                logger.info("Agent wait for chat %s (iteration %d)", self.chat_id, iteration)
+                return
+
+            if action == "reply":
+                turn.turn_type = "reply"
+                max_reply = cfg.get("max_reply", 5)
+                self._save_reply(
+                    db, [], turn,
+                    decision.get("messages", [{"content": llm_result.assistant_text}]),
+                    max_reply,
+                    files=decision.get("files"),
+                )
+                logger.info(
+                    "Agent reply for chat %s (iteration %d)",
+                    self.chat_id, iteration,
+                )
+                return
+
+            if action == "tool_call":
+                turn.turn_type = "reply"  # Keep as reply type for UI grouping
+                command = decision.get("command", "")
+                description = decision.get("description", "")
+                tool_name = decision.get("tool", "shell")
+
+                if not command:
+                    # Empty command — treat as error, feed back to LLM
+                    messages_for_llm.append({
+                        "role": "user",
+                        "content": "[SYSTEM] Error: tool_call requires a 'command' field.",
+                    })
+                    parent_turn_id = turn.id
+                    continue
+
+                # Save the tool call message
+                seq = get_next_sequence(db, self.chat_id)
+                call_msg = Message(
+                    chat_id=self.chat_id,
+                    role="sandbox",
+                    content=command,
+                    turn_id=turn.id,
+                    sequence_num=seq,
+                    message_type="sandbox_call",
+                    metadata_json=json.dumps({
+                        "tool": tool_name,
+                        "command": command,
+                        "description": description,
+                    }),
+                )
+                db.add(call_msg)
+
+                # Ensure sandbox container exists
+                try:
+                    loop2 = asyncio.new_event_loop()
+                    try:
+                        loop2.run_until_complete(
+                            SandboxManager.ensure_container(self.chat_id, db_session=db)
+                        )
+                    finally:
+                        loop2.close()
+                except Exception as e:
+                    logger.error("Sandbox ensure_container failed: %s", e)
+                    result = SandboxResult(
+                        stdout="",
+                        stderr=str(e),
+                        exit_code=-1,
+                        duration_ms=0,
+                        error=f"Failed to start sandbox: {e}",
+                    )
+                    messages_for_llm.append({
+                        "role": "user",
+                        "content": f"[SYSTEM] Sandbox error: {e}",
+                    })
+                    parent_turn_id = turn.id
+                    continue
+                else:
+                    # Execute command
+                    try:
+                        loop3 = asyncio.new_event_loop()
+                        try:
+                            result = loop3.run_until_complete(
+                                SandboxManager.execute(self.chat_id, command)
+                            )
+                        finally:
+                            loop3.close()
+                    except Exception as e:
+                        logger.error("Sandbox execute failed: %s", e)
+                        result = SandboxResult(
+                            stdout="",
+                            stderr=str(e),
+                            exit_code=-1,
+                            duration_ms=0,
+                            error=str(e),
+                        )
+
+                # Format result for display
+                result_text = result.stdout
+                if result.stderr:
+                    result_text += f"\n[stderr]\n{result.stderr}"
+                if result.error:
+                    result_text += f"\n[error] {result.error}"
+                result_text += f"\nExit code: {result.exit_code} ({result.duration_ms}ms)"
+
+                # Save tool result message
+                seq2 = get_next_sequence(db, self.chat_id)
+                result_msg = Message(
+                    chat_id=self.chat_id,
+                    role="sandbox",
+                    content=result_text.strip() or "(no output)",
+                    turn_id=turn.id,
+                    sequence_num=seq2,
+                    message_type="sandbox_result",
+                    metadata_json=json.dumps({
+                        "exit_code": result.exit_code,
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                        "duration_ms": result.duration_ms,
+                    }),
+                )
+                db.add(result_msg)
+
+                # Feed result back to LLM for next iteration
+                messages_for_llm.append({
+                    "role": "user",
+                    "content": (
+                        f"[TOOL RESULT] Command: {command}\n"
+                        f"Output:\n{result_text}\n\n"
+                        "Decide next step: reply, wait, or another tool_call?"
+                    ),
+                })
+
+                # Continue loop
+                parent_turn_id = turn.id
+                logger.info(
+                    "Agent tool_call for chat %s (iteration %d): %s → exit %d",
+                    self.chat_id, iteration, command[:80], result.exit_code,
+                )
+                continue
+
+            # Unknown action — treat as reply
+            logger.warning(
+                "Unknown agent action '%s', treating as reply", action,
+            )
+            turn.turn_type = "reply"
+            self._save_reply(
+                db, [], turn,
+                [{"content": llm_result.assistant_text}],
+                cfg.get("max_reply", 5),
+                files=decision.get("files"),
+            )
+            return
+
+        # Max iterations exceeded — force final reply
+        logger.warning(
+            "Agent max iterations (%d) reached for chat %s, forcing reply",
+            max_iterations, self.chat_id,
+        )
+        self._force_reply(db, pending, 0, cfg)
+
     @staticmethod
     def _parse_decision(text: str) -> dict:
         """Parse the LLM's JSON decision response.
 
-        Returns a dict with 'action' ('reply'|'wait') and optionally 'messages'.
+        Handles: valid JSON, JSON in markdown fences, JSON with preamble,
+        XML/function-calling format, and common JSON errors (unescaped quotes).
         Falls back to treating the entire text as a single reply.
         """
+        import re
+
         if not text:
             return {"action": "wait"}
 
@@ -480,12 +880,12 @@ class DecisionLoop:
         # Strip markdown code fences if present
         if text.startswith("```"):
             lines = text.split("\n")
-            # Remove opening fence
             text = "\n".join(lines[1:]) if len(lines) > 1 else ""
-            # Remove closing fence
             if text.rstrip().endswith("```"):
                 text = text.rstrip()[:-3].strip()
+            text = text.strip()
 
+        # ── Attempt 1: direct JSON parse ────────────────────────────
         try:
             decision = json.loads(text)
             if isinstance(decision, dict) and "action" in decision:
@@ -493,9 +893,53 @@ class DecisionLoop:
         except (json.JSONDecodeError, ValueError):
             pass
 
-        # Try to find JSON in the response (sometimes LLM adds preamble)
-        import re
+        # ── Attempt 2: extract {…} block via brace matching ─────────
+        # Find ALL positions of {"action" and try parsing each (last one first,
+        # since LLMs tend to put reasoning before the actual JSON).
+        import re as _re2
 
+        action_starts = [m.start() for m in _re2.finditer(r'\{\s*"action"\s*:', text)]
+        # Try last match first (LLM puts reasoning before JSON)
+        for start in reversed(action_starts):
+            depth = 0
+            in_string = False
+            escape_next = False
+            for i in range(start, len(text)):
+                ch = text[i]
+                if escape_next:
+                    escape_next = False
+                    continue
+                if ch == "\\":
+                    escape_next = True
+                    continue
+                if ch == '"' and not escape_next:
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        candidate = text[start:i+1]
+                        try:
+                            decision = json.loads(candidate)
+                            if isinstance(decision, dict) and "action" in decision:
+                                return decision
+                        except (json.JSONDecodeError, ValueError):
+                            fixed = _fix_json_quotes(candidate)
+                            if fixed:
+                                try:
+                                    decision = json.loads(fixed)
+                                    if isinstance(decision, dict) and "action" in decision:
+                                        logger.info("Parsed JSON after quote fix")
+                                        return decision
+                                except (json.JSONDecodeError, ValueError):
+                                    pass
+                        break
+
+        # ── Attempt 3: regex fallback (simple flat JSON) ─────────────
         m = re.search(r"\{[^{}]*\"action\"[^{}]*\}", text, re.DOTALL)
         if m:
             try:
@@ -505,7 +949,28 @@ class DecisionLoop:
             except (json.JSONDecodeError, ValueError):
                 pass
 
-        # Fallback: treat the entire response as a single reply
+        # ── Attempt 4: XML/function-calling format ───────────────────
+        if "<function_calls>" in text or "<invoke" in text:
+            cmd_match = re.search(
+                r'<parameter\s+name="command"[^>]*>(.*?)</parameter>',
+                text, re.DOTALL,
+            )
+            desc_match = re.search(
+                r'<parameter\s+name="description"[^>]*>(.*?)</parameter>',
+                text, re.DOTALL,
+            )
+            if cmd_match:
+                command = cmd_match.group(1).strip()
+                description = desc_match.group(1).strip() if desc_match else ""
+                logger.info("Parsed tool_call from XML format: %.100s", command)
+                return {
+                    "action": "tool_call",
+                    "tool": "shell",
+                    "command": command,
+                    "description": description,
+                }
+
+        # ── Fallback: treat as text reply ───────────────────────────
         logger.warning(
             "Could not parse decision JSON, falling back to single reply. Text: %.200s",
             text,
@@ -514,6 +979,36 @@ class DecisionLoop:
             "action": "reply",
             "messages": [{"content": text}],
         }
+
+
+def _fix_json_quotes(text: str) -> str | None:
+    """Attempt to fix unescaped double-quotes inside JSON string values.
+
+    For badly-formed JSON like:
+      {"action":"tool_call","command":"echo "hello"","description":"x"}
+    we try to produce:
+      {"action":"tool_call","command":"echo \"hello\"","description":"x"}
+
+    Strategy: find the "command" field (the most likely to contain unescaped
+    quotes) and brute-force escape inner double quotes within it.
+    """
+    import re as _re
+
+    # Locate "command":"..." — the value runs until ",description" or "}
+    m = _re.search(
+        r'"command"\s*:\s*"(.*?)"\s*,\s*"description"',
+        text, _re.DOTALL,
+    )
+    if m:
+        cmd_value = m.group(1)
+        # Escape any unescaped double-quotes inside the command value
+        fixed_cmd = _re.sub(r'(?<!\\)"', r'\\"', cmd_value)
+        if fixed_cmd != cmd_value:
+            before = text[:m.start(1)]
+            after = text[m.end(1):]
+            return before + fixed_cmd + after
+
+    return None
 
 
 # ── Manager ───────────────────────────────────────────────────────────

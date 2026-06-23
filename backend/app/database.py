@@ -11,6 +11,17 @@ engine = create_engine(
     echo=False,
 )
 
+# Enable WAL mode for better concurrency (needed for agent sandbox)
+if "sqlite" in settings.database_url:
+    from sqlalchemy import event as _event
+
+    @_event.listens_for(engine, "connect")
+    def _set_wal(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.close()
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -71,3 +82,35 @@ def migrate_db():
                         f"ALTER TABLE global_settings ADD COLUMN {col_name} {col_def}"
                     ))
                     conn.commit()
+
+    # Chat: agent_enabled, agent_max_iterations
+    if "chats" in inspector.get_table_names():
+        chat_cols = {c["name"] for c in inspector.get_columns("chats")}
+        if "agent_enabled" not in chat_cols:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE chats ADD COLUMN agent_enabled BOOLEAN DEFAULT 1"
+                ))
+                conn.commit()
+        if "agent_max_iterations" not in chat_cols:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE chats ADD COLUMN agent_max_iterations INTEGER DEFAULT 10"
+                ))
+                conn.commit()
+
+    # Message: message_type, metadata_json
+    if "messages" in inspector.get_table_names():
+        msg_cols = {c["name"] for c in inspector.get_columns("messages")}
+        if "message_type" not in msg_cols:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE messages ADD COLUMN message_type VARCHAR(20) DEFAULT 'text'"
+                ))
+                conn.commit()
+        if "metadata_json" not in msg_cols:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE messages ADD COLUMN metadata_json TEXT"
+                ))
+                conn.commit()
