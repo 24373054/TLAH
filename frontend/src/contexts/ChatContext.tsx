@@ -1,4 +1,34 @@
 import { createContext, useCallback, useContext, useEffect, useReducer, useRef, type ReactNode } from 'react';
+
+// ── Token buffer for smooth streaming ──────────────────────────────
+const TOKEN_SPEED_MS = 22; // release one token every 22ms
+
+let _tokenBuffer: string[] = [];
+let _flushTimer: ReturnType<typeof setInterval> | null = null;
+
+function startTokenFlush(dispatch: React.Dispatch<Action>) {
+  if (_flushTimer) return;
+  _flushTimer = setInterval(() => {
+    if (_tokenBuffer.length === 0) return;
+    // Release up to 2 tokens per tick to catch up if buffer grows
+    const batch = _tokenBuffer.splice(0, 2);
+    for (const t of batch) {
+      dispatch({ type: 'APPEND_TOKEN', token: t });
+    }
+  }, TOKEN_SPEED_MS);
+}
+
+function stopTokenFlush() {
+  if (_flushTimer) {
+    clearInterval(_flushTimer);
+    _flushTimer = null;
+  }
+  // Drain remaining tokens immediately
+  if (_tokenBuffer.length > 0) {
+    _tokenBuffer = []; // Will be flushed on next render cycle
+  }
+  _tokenBuffer = [];
+}
 import type { ChatSummary, ChatDetail, Message, SendMessageResponse } from '../types';
 import * as api from '../api/client';
 
@@ -186,13 +216,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     esRef.current = es;
 
     es.addEventListener('thinking', () => {
+      _tokenBuffer = [];
       dispatch({ type: 'START_STREAMING' });
+      startTokenFlush(dispatch);
     });
 
     es.addEventListener('token', (e: MessageEvent) => {
       try {
         const { text } = JSON.parse(e.data);
-        dispatch({ type: 'APPEND_TOKEN', token: text });
+        _tokenBuffer.push(text);
+        startTokenFlush(dispatch);
       } catch { /* ignore parse errors */ }
     });
 
@@ -212,6 +245,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     });
 
     es.addEventListener('done', () => {
+      stopTokenFlush();
+      // Drain any remaining buffered tokens immediately
+      if (_tokenBuffer.length > 0) {
+        for (const t of _tokenBuffer) {
+          dispatch({ type: 'APPEND_TOKEN', token: t });
+        }
+        _tokenBuffer = [];
+      }
       dispatch({ type: 'FINALIZE_STREAMING' });
       // Reload chat to get the saved assistant messages
       api.getChat(chatId).then(chat => {
@@ -225,6 +266,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const disconnectSSE = useCallback(() => {
+    stopTokenFlush();
     if (esRef.current) {
       esRef.current.close();
       esRef.current = null;

@@ -29,7 +29,7 @@ from app.services.settings_service import get_effective_settings
 logger = logging.getLogger(__name__)
 
 # ── Configurable defaults (fallback if not in DB) ───────────────────
-_DEFAULT_DEBOUNCE = 2.0
+_DEFAULT_DEBOUNCE = 0.8
 _DEFAULT_MAX_PENDING = 10
 _DEFAULT_MAX_WAIT = 30
 _DEFAULT_MAX_REPLY = 5

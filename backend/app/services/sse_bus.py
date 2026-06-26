@@ -51,7 +51,7 @@ class SseBus:
         while True:
             try:
                 # Wait up to 30s for an event, then send a heartbeat
-                payload = await asyncio.wait_for(queue.get(), timeout=30.0)
+                payload = await asyncio.wait_for(queue.get(), timeout=3.0)
                 data = json.loads(payload)
                 event_type = data.get("event", "message")
                 event_data = json.dumps(data.get("data", {}))
