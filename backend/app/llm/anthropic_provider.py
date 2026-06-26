@@ -4,6 +4,8 @@ from typing import Any
 
 import httpx
 
+from collections.abc import AsyncGenerator
+
 from app.llm.base import LLMProvider, LLMResponse
 
 
@@ -102,3 +104,58 @@ class AnthropicProvider(LLMProvider):
             token_usage=token_usage,
             error=error,
         )
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, str]],
+        system_prompt: str,
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+    ) -> AsyncGenerator[str, None]:
+        """Stream tokens from the Anthropic Messages API."""
+        body: dict[str, Any] = {
+            "model": self._model,
+            "max_tokens": max_tokens,
+            "system": system_prompt,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": True,
+        }
+
+        headers = {
+            "x-api-key": self._api_key,
+            "anthropic-version": self.ANTHROPIC_VERSION,
+            "Content-Type": "application/json",
+        }
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream(
+                "POST",
+                self.endpoint_url(),
+                json=body,
+                headers=headers,
+            ) as response:
+                current_block_type = "text"  # default
+                async for line in response.aiter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data_str = line[6:]
+                    try:
+                        data = json.loads(data_str)
+                        event_type = data.get("type", "")
+                        if event_type == "content_block_start":
+                            block = data.get("content_block", {})
+                            current_block_type = block.get("type", "text")
+                        elif event_type == "content_block_delta":
+                            delta = data.get("delta", {})
+                            token = delta.get("thinking", "") or delta.get("text", "")
+                            if token:
+                                # Prefix thinking tokens so receiver can separate
+                                if current_block_type == "thinking":
+                                    yield f"\x01{token}"  # \x01 prefix = thinking
+                                else:
+                                    yield token
+                        elif event_type == "message_stop":
+                            break
+                    except json.JSONDecodeError:
+                        continue

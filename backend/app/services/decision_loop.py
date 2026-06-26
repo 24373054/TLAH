@@ -646,7 +646,9 @@ class DecisionLoop:
                     msg.turn_id = turn.id
                 first_turn = False
 
-            # Call LLM
+            # Call LLM (streaming)
+            from app.services.sse_bus import SseBus
+
             provider = create_provider(
                 provider_name=effective.provider,
                 api_key=effective.api_key,
@@ -654,30 +656,75 @@ class DecisionLoop:
                 model=effective.model,
             )
 
+            SseBus.push(self.chat_id, "thinking", {})
+
+            thinking_buffer: list[str] = []
+            text_buffer: list[str] = []
             loop = asyncio.new_event_loop()
             try:
-                llm_result = loop.run_until_complete(
-                    provider.chat(
+                async def _stream_tokens():
+                    async for token in provider.chat_stream(
                         messages=messages_for_llm,
                         system_prompt=system_prompt,
                         temperature=effective.temperature,
                         max_tokens=effective.max_tokens,
-                    )
-                )
+                    ):
+                        if token.startswith("\x01"):
+                            # Thinking token (strip prefix for display)
+                            clean = token[1:]
+                            thinking_buffer.append(clean)
+                            SseBus.push(self.chat_id, "token", {"text": clean})
+                        else:
+                            text_buffer.append(token)
+                            SseBus.push(self.chat_id, "token", {"text": token})
+                loop.run_until_complete(_stream_tokens())
             finally:
                 loop.close()
 
-            # Store debug data
-            self._save_debug_data(db, turn, provider, llm_result)
+            full_text = "".join(text_buffer)
+            thinking_text = "".join(thinking_buffer) if thinking_buffer else None
 
-            # Parse decision. If JSON parsing failed (returned text as-is in "messages"),
-            # give the LLM one chance to correct itself.
-            decision = self._parse_decision(llm_result.assistant_text)
+            # Store debug data
+            from app.models.debug import RawRequest as RR, RawResponse as RS
+
+            raw_req = RR(
+                turn_id=turn.id,
+                provider=provider.provider_name(),
+                endpoint_url=provider.endpoint_url(),
+                request_json=json.dumps({
+                    "model": effective.model,
+                    "messages": messages_for_llm,
+                    "stream": True,
+                }, indent=2, ensure_ascii=False),
+            )
+            db.add(raw_req)
+
+            content_blocks = []
+            if thinking_text:
+                content_blocks.append({"type": "thinking", "thinking": thinking_text})
+            content_blocks.append({"type": "text", "text": full_text})
+
+            raw_resp = RS(
+                turn_id=turn.id,
+                provider=provider.provider_name(),
+                response_json=json.dumps({
+                    "model": effective.model,
+                    "streamed": True,
+                    "content": content_blocks,
+                    "note": "Streaming mode — thinking and text tokens captured separately.",
+                }, indent=2, ensure_ascii=False),
+                http_status_code=200,
+                latency_ms=0,
+            )
+            db.add(raw_resp)
+
+            # Parse decision
+            decision = self._parse_decision(full_text)
             was_fallback = (
                 decision.get("action") == "reply"
                 and len(decision.get("messages", [])) == 1
-                and llm_result.assistant_text.strip() == decision["messages"][0]["content"]
-                and not llm_result.assistant_text.strip().startswith("{")
+                and full_text.strip() == decision["messages"][0]["content"]
+                and not full_text.strip().startswith("{")
             )
             if was_fallback and iteration < max_iterations:
                 logger.warning(
@@ -700,10 +747,10 @@ class DecisionLoop:
 
             if action == "wait":
                 turn.turn_type = "wait"
-                # Undo pending link if we're waiting
                 if first_turn is False and parent_turn_id is None:
                     for msg in pending:
                         msg.turn_id = None
+                SseBus.push(self.chat_id, "done", {})
                 logger.info("Agent wait for chat %s (iteration %d)", self.chat_id, iteration)
                 return
 
@@ -712,10 +759,11 @@ class DecisionLoop:
                 max_reply = cfg.get("max_reply", 5)
                 self._save_reply(
                     db, [], turn,
-                    decision.get("messages", [{"content": llm_result.assistant_text}]),
+                    decision.get("messages", [{"content": full_text}]),
                     max_reply,
                     files=decision.get("files"),
                 )
+                SseBus.push(self.chat_id, "done", {})
                 logger.info(
                     "Agent reply for chat %s (iteration %d)",
                     self.chat_id, iteration,
@@ -753,6 +801,10 @@ class DecisionLoop:
                     }),
                 )
                 db.add(call_msg)
+                SseBus.push(self.chat_id, "sandbox_call", {
+                    "command": command,
+                    "description": description,
+                })
 
                 # Ensure sandbox container exists
                 try:
@@ -823,6 +875,11 @@ class DecisionLoop:
                     }),
                 )
                 db.add(result_msg)
+                SseBus.push(self.chat_id, "sandbox_result", {
+                    "exit_code": result.exit_code,
+                    "output": result_text.strip() or "(no output)",
+                    "duration_ms": result.duration_ms,
+                })
 
                 # Feed result back to LLM for next iteration
                 messages_for_llm.append({
@@ -849,7 +906,7 @@ class DecisionLoop:
             turn.turn_type = "reply"
             self._save_reply(
                 db, [], turn,
-                [{"content": llm_result.assistant_text}],
+                [{"content": full_text}],
                 cfg.get("max_reply", 5),
                 files=decision.get("files"),
             )

@@ -9,7 +9,7 @@ PID_DIR="$ROOT/.pids"
 mkdir -p "$PID_DIR"
 
 PORT="${PORT:-8000}"
-WORKERS="${WORKERS:-4}"
+WORKERS="${WORKERS:-1}"
 
 echo "=== TLAH Deploy ==="
 

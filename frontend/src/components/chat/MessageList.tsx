@@ -13,12 +13,12 @@ interface MessageGroup {
 
 export function MessageList() {
   const { state } = useChat();
-  const { currentChat, sending, polling } = state;
+  const { currentChat, sending, streaming, streamingContent, thinkingText } = state;
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [currentChat?.messages, sending, polling]);
+  }, [currentChat?.messages, sending, streaming, streamingContent]);
 
   if (!currentChat) return null;
 
@@ -63,15 +63,49 @@ export function MessageList() {
         <TurnGroup key={group.turnId ?? `pending-${idx}`} group={group} />
       ))}
 
-      {/* Show thinking indicator during polling (async harness) or sending (legacy) */}
-      {(sending || polling) && (
+      {/* Streaming thinking bubble */}
+      {streaming && (
+        <div className="flex justify-center py-1">
+          <div className="max-w-[94%] sm:max-w-[85%] w-full rounded-lg overflow-hidden
+                          bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-800">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-900
+                            border-b border-gray-200 dark:border-gray-800">
+              <Spinner className="text-purple-500 w-3 h-3" />
+              <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                🧠 Thinking...
+              </span>
+            </div>
+            <div className="px-3 py-2 font-mono text-xs text-gray-400 dark:text-gray-500
+                            whitespace-pre-wrap break-words max-h-60 overflow-y-auto">
+              {streamingContent || '...'}
+              <span className="inline-block w-1.5 h-3.5 bg-purple-400 dark:bg-purple-500 animate-pulse ml-0.5 align-middle" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Folded thinking (after completion) */}
+      {!streaming && thinkingText && (
+        <details className="flex justify-center py-1 cursor-pointer">
+          <summary className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300
+                               transition-colors px-2 py-1">
+            🧠 Thinking (click to expand)
+          </summary>
+          <pre className="mt-1 px-3 py-2 bg-gray-50 dark:bg-gray-900/50 rounded-lg
+                           text-xs text-gray-400 dark:text-gray-500 font-mono
+                           whitespace-pre-wrap break-words max-h-60 overflow-y-auto">
+            {thinkingText}
+          </pre>
+        </details>
+      )}
+
+      {/* Sending indicator (brief, before SSE connects) */}
+      {sending && !streaming && (
         <div className="flex items-center gap-3 px-4 py-3 animate-pulse">
           <div className="w-7 h-7 rounded-full bg-purple-100 dark:bg-purple-600/20 flex items-center justify-center">
             <Spinner className="text-purple-600 dark:text-purple-400 w-4 h-4" />
           </div>
-          <span className="text-sm text-gray-400 dark:text-gray-500">
-            {sending ? 'Sending...' : 'AI is thinking...'}
-          </span>
+          <span className="text-sm text-gray-400 dark:text-gray-500">Sending...</span>
         </div>
       )}
 

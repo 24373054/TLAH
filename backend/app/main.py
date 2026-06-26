@@ -1,3 +1,4 @@
+import asyncio
 import os
 from contextlib import asynccontextmanager
 
@@ -18,9 +19,11 @@ STATIC_DIR = os.path.abspath(STATIC_DIR)
 async def lifespan(app: FastAPI):
     init_db()
     migrate_db()
+    # Register event loop for SSE bus
+    from app.services.sse_bus import SseBus
+    SseBus.set_event_loop(asyncio.get_event_loop())
     yield
     # Cleanup sandboxes on shutdown
-    import asyncio
     from app.services.sandbox import SandboxManager
     try:
         loop = asyncio.get_event_loop()

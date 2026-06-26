@@ -10,7 +10,9 @@ interface State {
   currentChat: ChatDetail | null;
   loading: boolean;
   sending: boolean;
-  polling: boolean;      // True while waiting for AI response
+  streaming: boolean;          // True while receiving LLM tokens
+  streamingContent: string;    // Accumulated streaming text (thinking)
+  thinkingText: string | null; // Last completed thinking text (folded)
   error: string | null;
 }
 
@@ -19,13 +21,21 @@ type Action =
   | { type: 'SET_CURRENT_CHAT'; chat: ChatDetail | null }
   | { type: 'SET_LOADING'; loading: boolean }
   | { type: 'SET_SENDING'; sending: boolean }
-  | { type: 'SET_POLLING'; polling: boolean }
   | { type: 'SET_ERROR'; error: string | null }
   | { type: 'ADD_MESSAGES'; userMsg: Message; assistantMsg: Message }
-  | { type: 'ADD_QUEUED_MESSAGE'; message: Message }
+  | { type: 'ADD_QUEUED_MESSAGE'; message: Message; tempId?: string }
+  | { type: 'ADD_SANDBOX_CALL'; content: string; description: string }
+  | { type: 'ADD_SANDBOX_RESULT'; exit_code: number; output: string }
+  | { type: 'START_STREAMING' }
+  | { type: 'APPEND_TOKEN'; token: string }
+  | { type: 'FINALIZE_STREAMING'; message?: Message }
   | { type: 'REFRESH_MESSAGES'; chat: ChatDetail }
   | { type: 'REMOVE_CHAT'; chatId: string }
   | { type: 'UPDATE_CHAT_TITLE'; chatId: string; title: string };
+
+// Generate temp IDs for streaming placeholders
+let _tempId = 0;
+const _tid = () => `streaming-${++_tempId}`;
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -37,17 +47,17 @@ function reducer(state: State, action: Action): State {
         currentChat: action.chat,
         currentChatId: action.chat?.id ?? null,
         loading: false,
-        polling: false,
+        streaming: false,
+        streamingContent: '',
+        thinkingText: null,
         error: null,
       };
     case 'SET_LOADING':
       return { ...state, loading: action.loading };
     case 'SET_SENDING':
       return { ...state, sending: action.sending };
-    case 'SET_POLLING':
-      return { ...state, polling: action.polling };
     case 'SET_ERROR':
-      return { ...state, error: action.error, loading: false, sending: false, polling: false };
+      return { ...state, error: action.error, loading: false, sending: false, streaming: false };
     case 'ADD_MESSAGES':
       if (!state.currentChat) return state;
       return {
@@ -66,16 +76,54 @@ function reducer(state: State, action: Action): State {
           messages: [...state.currentChat.messages, action.message],
         },
       };
-    case 'REFRESH_MESSAGES':
+    case 'ADD_SANDBOX_CALL': {
       if (!state.currentChat) return state;
+      const callMsg: Message = {
+        id: _tid(),
+        role: 'sandbox',
+        content: action.content,
+        turn_id: null,
+        sequence_num: state.currentChat.messages.length + 1,
+        message_type: 'sandbox_call',
+        metadata_json: { command: action.content, description: action.description },
+        created_at: new Date().toISOString(),
+      };
       return {
         ...state,
-        currentChat: {
-          ...state.currentChat,
-          messages: action.chat.messages,
-          turns: action.chat.turns,
-        },
+        currentChat: { ...state.currentChat, messages: [...state.currentChat.messages, callMsg] },
       };
+    }
+    case 'ADD_SANDBOX_RESULT': {
+      if (!state.currentChat) return state;
+      const resultMsg: Message = {
+        id: _tid(),
+        role: 'sandbox',
+        content: action.output,
+        turn_id: null,
+        sequence_num: state.currentChat.messages.length + 1,
+        message_type: 'sandbox_result',
+        metadata_json: { exit_code: action.exit_code, output: action.output },
+        created_at: new Date().toISOString(),
+      };
+      return {
+        ...state,
+        currentChat: { ...state.currentChat, messages: [...state.currentChat.messages, resultMsg] },
+      };
+    }
+    case 'START_STREAMING':
+      return { ...state, streaming: true, streamingContent: '', thinkingText: null };
+    case 'APPEND_TOKEN':
+      return { ...state, streamingContent: state.streamingContent + action.token };
+    case 'FINALIZE_STREAMING':
+      return {
+        ...state,
+        streaming: false,
+        thinkingText: state.streamingContent || null,
+        streamingContent: '',
+      };
+    case 'REFRESH_MESSAGES':
+      if (!state.currentChat) return state;
+      return { ...state, currentChat: { ...state.currentChat, messages: action.chat.messages, turns: action.chat.turns } };
     case 'REMOVE_CHAT':
       return {
         ...state,
@@ -86,9 +134,7 @@ function reducer(state: State, action: Action): State {
     case 'UPDATE_CHAT_TITLE':
       return {
         ...state,
-        chats: state.chats.map(c =>
-          c.id === action.chatId ? { ...c, title: action.title } : c,
-        ),
+        chats: state.chats.map(c => c.id === action.chatId ? { ...c, title: action.title } : c),
       };
     default:
       return state;
@@ -106,16 +152,9 @@ interface ChatContextValue {
   sendMessage: (content: string, role?: string) => Promise<SendMessageResponse | null>;
   updateSystemPrompt: (prompt: string) => Promise<void>;
   updateTitle: (title: string) => Promise<void>;
-  /** Check for new AI replies from the async harness (called manually or by polling) */
-  checkForReplies: () => Promise<void>;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
-
-// ── Polling Configuration ──────────────────────────────────────────
-
-const POLL_INTERVAL_MS = 1500;
-const POLL_TIMEOUT_MS = 90000;
 
 // ── Provider ───────────────────────────────────────────────────────
 
@@ -126,83 +165,72 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     currentChat: null,
     loading: false,
     sending: false,
-    polling: false,
+    streaming: false,
+    streamingContent: '',
+    thinkingText: null,
     error: null,
   });
 
-  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pollStartRef = useRef<number>(0);
+  const esRef = useRef<EventSource | null>(null);
 
-  // ── Polling ────────────────────────────────────────────────────
+  // ── SSE connection ──────────────────────────────────────────────
 
-  const stopPolling = useCallback(() => {
-    if (pollTimerRef.current) {
-      clearInterval(pollTimerRef.current);
-      pollTimerRef.current = null;
+  const connectSSE = useCallback((chatId: string) => {
+    // Close existing connection
+    if (esRef.current) {
+      esRef.current.close();
+      esRef.current = null;
     }
-    dispatch({ type: 'SET_POLLING', polling: false });
+
+    const es = new EventSource(`/api/chats/${chatId}/stream`);
+    esRef.current = es;
+
+    es.addEventListener('thinking', () => {
+      dispatch({ type: 'START_STREAMING' });
+    });
+
+    es.addEventListener('token', (e: MessageEvent) => {
+      try {
+        const { text } = JSON.parse(e.data);
+        dispatch({ type: 'APPEND_TOKEN', token: text });
+      } catch { /* ignore parse errors */ }
+    });
+
+    es.addEventListener('sandbox_call', (e: MessageEvent) => {
+      try {
+        const { command, description } = JSON.parse(e.data);
+        dispatch({ type: 'ADD_SANDBOX_CALL', content: command, description: description || '' });
+      } catch { /* ignore */ }
+    });
+
+    es.addEventListener('sandbox_result', (e: MessageEvent) => {
+      try {
+        const { exit_code, output } = JSON.parse(e.data);
+        dispatch({ type: 'ADD_SANDBOX_RESULT', exit_code: exit_code ?? 1, output: output || '' });
+        dispatch({ type: 'FINALIZE_STREAMING' });
+      } catch { /* ignore */ }
+    });
+
+    es.addEventListener('done', () => {
+      dispatch({ type: 'FINALIZE_STREAMING' });
+      // Reload chat to get the saved assistant messages
+      api.getChat(chatId).then(chat => {
+        dispatch({ type: 'REFRESH_MESSAGES', chat });
+      }).catch(() => {});
+    });
+
+    es.onerror = () => {
+      // EventSource auto-reconnects; nothing to do
+    };
   }, []);
 
-  const startPolling = useCallback(
-    (chatId: string) => {
-      stopPolling();
-      pollStartRef.current = Date.now();
-      dispatch({ type: 'SET_POLLING', polling: true });
-
-      pollTimerRef.current = setInterval(async () => {
-        // Timeout check
-        if (Date.now() - pollStartRef.current > POLL_TIMEOUT_MS) {
-          stopPolling();
-          dispatch({
-            type: 'SET_ERROR',
-            error: 'AI response timed out. The decision loop may be stuck.',
-          });
-          return;
-        }
-
-        try {
-          const chat = await api.getChat(chatId);
-          const prev = state.currentChat;
-          if (!prev) {
-            stopPolling();
-            return;
-          }
-
-          // Check if there are new assistant messages, or pending messages got acknowledged
-          const prevMsgIds = new Set(prev.messages.map(m => m.id));
-          const newMsgs = chat.messages.filter(m => !prevMsgIds.has(m.id));
-          const hasNewAssistant = newMsgs.some(m => m.role === 'assistant');
-          const prevPendingCount = prev.messages.filter(m => m.turn_id === null).length;
-          const currPendingCount = chat.messages.filter(m => m.turn_id === null).length;
-          const pendingResolved = prevPendingCount > 0 && currPendingCount < prevPendingCount;
-
-          if (hasNewAssistant || pendingResolved || newMsgs.length > 0) {
-            dispatch({ type: 'REFRESH_MESSAGES', chat });
-            if (!chat.messages.some(m => m.turn_id === null)) {
-              // All messages confirmed — stop polling
-              stopPolling();
-            }
-          }
-        } catch {
-          // Silently continue polling on transient errors
-        }
-      }, POLL_INTERVAL_MS);
-    },
-    [stopPolling, state.currentChat],
-  );
-
-  const checkForReplies = useCallback(async () => {
-    if (!state.currentChatId) return;
-    try {
-      const chat = await api.getChat(state.currentChatId);
-      dispatch({ type: 'REFRESH_MESSAGES', chat });
-      if (!chat.messages.some(m => m.turn_id === null)) {
-        stopPolling();
-      }
-    } catch {
-      // ignore
+  const disconnectSSE = useCallback(() => {
+    if (esRef.current) {
+      esRef.current.close();
+      esRef.current = null;
     }
-  }, [state.currentChatId, stopPolling]);
+    dispatch({ type: 'FINALIZE_STREAMING' });
+  }, []);
 
   // ── Chat operations ─────────────────────────────────────────────
 
@@ -216,19 +244,17 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const selectChat = useCallback(async (id: string) => {
-    stopPolling();
+    disconnectSSE();
     dispatch({ type: 'SET_LOADING', loading: true });
     try {
       const chat = await api.getChat(id);
       dispatch({ type: 'SET_CURRENT_CHAT', chat });
-      // If there are pending messages (turn_id=null), start polling
-      if (chat.messages.some(m => m.turn_id === null)) {
-        startPolling(id);
-      }
+      // Open SSE for this chat
+      connectSSE(id);
     } catch (e) {
       dispatch({ type: 'SET_ERROR', error: (e as Error).message });
     }
-  }, [stopPolling, startPolling]);
+  }, [disconnectSSE, connectSSE]);
 
   const createChat = useCallback(async () => {
     try {
@@ -246,13 +272,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     try {
       await api.deleteChat(id);
       dispatch({ type: 'REMOVE_CHAT', chatId: id });
-      stopPolling();
+      disconnectSSE();
     } catch (e) {
       dispatch({ type: 'SET_ERROR', error: (e as Error).message });
     }
-  }, [stopPolling]);
+  }, [disconnectSSE]);
 
-  // ── Send Message (async harness: queue → poll) ──────────────────
+  // ── Send Message ────────────────────────────────────────────────
 
   const sendMessage = useCallback(
     async (content: string, role?: string): Promise<SendMessageResponse | null> => {
@@ -261,14 +287,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'SET_ERROR', error: null });
 
       try {
-        // Use the async harness: queue the message, let DecisionLoop handle it
         const result = await api.queueMessage(state.currentChatId, content, role);
-        // Show the queued message immediately in the chat
         dispatch({ type: 'ADD_QUEUED_MESSAGE', message: result.message });
-        // Start polling for the AI response
-        startPolling(state.currentChatId);
-        await loadChats(); // Refresh sidebar
-        return null; // No immediate assistant message — it'll arrive via polling
+        await loadChats();
+        // SSE will handle incoming tokens and messages — no polling needed
+        return null;
       } catch (e) {
         dispatch({ type: 'SET_ERROR', error: (e as Error).message });
         return null;
@@ -276,7 +299,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'SET_SENDING', sending: false });
       }
     },
-    [state.currentChatId, startPolling, loadChats],
+    [state.currentChatId, loadChats],
   );
 
   // ── Settings ────────────────────────────────────────────────────
@@ -287,10 +310,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       try {
         await api.updateChat(state.currentChatId, { system_prompt: prompt });
         if (state.currentChat) {
-          dispatch({
-            type: 'SET_CURRENT_CHAT',
-            chat: { ...state.currentChat, system_prompt: prompt },
-          });
+          dispatch({ type: 'SET_CURRENT_CHAT', chat: { ...state.currentChat, system_prompt: prompt } });
         }
       } catch (e) {
         dispatch({ type: 'SET_ERROR', error: (e as Error).message });
@@ -316,22 +336,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     loadChats();
-    return () => stopPolling();
-  }, [loadChats, stopPolling]);
+    return () => disconnectSSE();
+  }, [loadChats, disconnectSSE]);
 
   return (
     <ChatContext.Provider
-      value={{
-        state,
-        loadChats,
-        selectChat,
-        createChat,
-        deleteChat,
-        sendMessage,
-        updateSystemPrompt,
-        updateTitle,
-        checkForReplies,
-      }}
+      value={{ state, loadChats, selectChat, createChat, deleteChat, sendMessage, updateSystemPrompt, updateTitle }}
     >
       {children}
     </ChatContext.Provider>

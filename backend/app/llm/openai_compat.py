@@ -4,6 +4,8 @@ from typing import Any
 
 import httpx
 
+from collections.abc import AsyncGenerator
+
 from app.llm.base import LLMProvider, LLMResponse
 
 
@@ -98,3 +100,55 @@ class OpenAICompatibleProvider(LLMProvider):
             token_usage=token_usage,
             error=error,
         )
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, str]],
+        system_prompt: str,
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+    ) -> AsyncGenerator[str, None]:
+        """Stream tokens from an OpenAI-compatible chat completions API."""
+        full_messages = [{"role": "system", "content": system_prompt}]
+        full_messages.extend(messages)
+
+        body: dict[str, Any] = {
+            "model": self._model,
+            "messages": full_messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream(
+                "POST",
+                self.endpoint_url(),
+                json=body,
+                headers=headers,
+            ) as response:
+                async for line in response.aiter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data_str = line[6:]  # strip "data: " prefix
+                    if data_str.strip() == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(data_str)
+                        choices = data.get("choices", [])
+                        if choices:
+                            delta = choices[0].get("delta", {})
+                            # Capture both reasoning and content tokens
+                            token = (
+                                delta.get("reasoning_content", "")
+                                or delta.get("content", "")
+                            )
+                            if token:
+                                yield token
+                    except json.JSONDecodeError:
+                        continue

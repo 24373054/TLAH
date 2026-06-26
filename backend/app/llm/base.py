@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -42,6 +43,21 @@ class LLMProvider(ABC):
         Returns:
             LLMResponse with the complete raw request, raw response,
             extracted assistant text, timing, and usage data.
+        """
+        ...
+
+    @abstractmethod
+    async def chat_stream(
+        self,
+        messages: list[dict[str, str]],
+        system_prompt: str,
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+    ) -> AsyncGenerator[str, None]:
+        """Execute a streaming chat completion.
+
+        Yields tokens as they arrive from the API. The caller is responsible
+        for accumulating the full response and parsing it.
         """
         ...
 

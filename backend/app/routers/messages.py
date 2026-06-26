@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -70,4 +71,41 @@ def queue_message(chat_id: str, body: QueueMessageRequest, db: Session = Depends
     DecisionLoopManager.signal(chat_id)
     return QueueMessageResponse(
         message=MessageResponse.model_validate(result.message),
+    )
+
+
+# ── SSE streaming endpoint ────────────────────────────────────────
+
+
+@router.get("/{chat_id}/stream")
+async def stream_chat(chat_id: str, request: Request):
+    """Server-Sent Events stream for real-time chat updates.
+
+    The frontend opens this as an EventSource to receive:
+    - token: LLM streaming tokens in real-time
+    - thinking: Agent started processing
+    - sandbox_call: Tool command about to execute
+    - sandbox_result: Tool execution output
+    - done: Processing complete
+    """
+    from app.services.sse_bus import SseBus
+
+    async def event_generator():
+        try:
+            async for event in SseBus.events(chat_id):
+                # Check if client disconnected
+                if await request.is_disconnected():
+                    break
+                yield event
+        finally:
+            SseBus.close(chat_id)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
